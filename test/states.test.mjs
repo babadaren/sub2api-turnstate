@@ -29,7 +29,9 @@ test('manual pin validation and scoped values survive process reload; secrets do
   assert.throws(()=>store.manual(id,'B'.repeat(280)));store.manual(id,'B'.repeat(292));store.flush();
   const reopened=new StateStore(home,'test-salt',()=>{},()=>1_800_000_000_000);assert.equal(reopened.reveal(id).state,'B'.repeat(292));
   const disk=fs.readFileSync(path.join(home,'states.json'),'utf8');assert.equal(disk.includes('Bearer private'),false);
-  assert.equal(JSON.stringify(store.snapshot()).includes('B'.repeat(292)),false);assert.equal(fs.statSync(path.join(home,'states.json')).mode&0o077,0);
+  assert.equal(JSON.stringify(store.snapshot()).includes('B'.repeat(292)),false);
+  // Windows does not expose POSIX group/other permission bits; enforce them on Linux.
+  if(process.platform !== 'win32') assert.equal(fs.statSync(path.join(home,'states.json')).mode&0o077,0);
 });
 test('turn scope bypasses missing identities, scopes explicit turns, and invalidates on rule changes',t=>{
   const {store,ctx}=fixture(t);let rules=defaultRules();rules['gpt-6-astra'].scope='turn';store.configure(rules);

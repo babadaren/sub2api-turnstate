@@ -74,7 +74,7 @@ async function refresh() {
     stateData = data; serverOffset = data.serverTime - Date.now(); rules = data.rules; renderRules(); renderPins(data);
     if (data.persistError) notify('警告：状态文件写入失败，目前只保存在内存中，请检查磁盘和权限。');
     $('observed').replaceChildren(...data.observed.map(o => { const tr = document.createElement('tr'); cells(tr, [o.model,histogram(o.requestLengths),histogram(o.responseLengths),time(o.lastSeen)]); return tr; }));
-    $('records').replaceChildren(...logs.records.map(r => { const tr = document.createElement('tr'); cells(tr, [time(r.time),r.kind === 'request' ? `${r.method} ${r.path}` : `${r.kind} / ${r.action}`,r.model,r.status,
+    $('records').replaceChildren(...logs.records.map(r => { const tr = document.createElement('tr'); cells(tr, [time(r.time),r.kind === 'request' ? `${r.method} ${r.path}` : `${r.kind} / ${r.action}`,r.model ? `${r.model} → ${r.responseModel || '响应未识别'}` : '—',r.status,
       r.requestStateLength === undefined ? '—' : `${r.requestStateLength} → ${r.forwardedStateLength}`,r.responseStateLength === undefined ? '—' : `${r.responseStateLength} → ${r.returnedStateLength}`,r.headersMs == null ? '—' : `${r.headersMs} ms`,[r.requestAction,r.responseAction,r.error].filter(Boolean).join(' / ')]); return tr; }));
   } finally { loading = false; }
 }

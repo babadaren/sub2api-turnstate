@@ -19,7 +19,7 @@ GitHub Release 提供标准 npm tarball；这是 **GitHub 发布资产，不代�
 ```bash
 # 建议使用私有 prefix，避免与系统已有 CLI 冲突。
 npm install -g --prefix /opt/sub2api-turnstate/npm --ignore-scripts \
-  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.2.1/babadaren-sub2api-turnstate-0.2.1.tgz
+  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.3.0/babadaren-sub2api-turnstate-0.3.0.tgz
 
 # 使用 Node 22+ 运行安装入口。安装会创建 systemd 服务、自动启动并设置开机启动。
 # --nginx-conf 指向你现有的 Sub2API 反向代理配置。
@@ -119,7 +119,35 @@ sudo turnstate states
 sudo turnstate refresh --model gpt-6-astra
 ```
 
-支持管理员对已有隔离绑定手动粘贴符合该模型长度的 state。当前版本 **不保存探测 API Key，不自动发送可能计费的探测请求，不遍历代理节点**。刷新不会切换或覆盖 Sub2API 的出站代理。
+支持管理员对已有隔离绑定手动粘贴符合该模型长度的 state。当前版本 **不持久化探测 API Key，不后台定期探测，不遍历代理节点**。普通刷新不会主动请求或切换出口；v0.3.0 增加了单独确认、次数受限的主动探测，见下节。
+
+## 主动探测（v0.3.0）
+
+控制台新增“主动探测”。它直接连接配置中的本机 Sub2API，不经过自己的状态回灌链路，**不带旧 state，不改变指定 model**，继续由 Sub2API 选择账号并使用原来的出站代理。
+
+先给目标模型配置并启用明确的固定长度，例如用户提供的 `gpt-6-astra → 292`。探测目标只能是该模型已配置的固定长度；不会把 292 当作所有模型的通用规则。
+
+两种启动方式：
+
+- **选定会话的下一条成功请求**：先用目标模型发一条正常请求，再在控制台选择对应的脱敏客户/会话，点击开始。下一条同绑定的正常请求成功结束后，仅本次借用其认证、会话和路由标识启动探测。不会保留聊天正文，也不会借用其他模型或其他 API Key 的请求。等待超过 120 秒即取消。
+- **手动输入**：输入 Sub2API API Key，以及与真实客户端相同的 session/turn 标识。密钥仅在本次任务内存中保存，结束/取消后移除引用，不进入记录或配置文件。标识不同就不是同一个固定绑定。
+
+默认 3 次、硬上限 10 次、串行、间隔至少 2 秒；每次请求 15 秒超时、运行最多 180 秒。每进程限制每 10 分钟最多启动 3 次、每小时最多 30 次请求；重启会重置这些内存限额。每次发送固定小提示及 `max_output_tokens: 16`，上游不支持该参数时直接报告 HTTP 错误，不自动移除限制后重试。上游实际计费以其账单为准。
+
+只有 2xx、目标长度、响应声明的模型与请求模型完全相同，而且响应正常结束（或明确因输出 token 上限结束）才采纳；错误、模型不符、无法识别响应模型、重复状态头、401/403/429、重定向、5xx 或不确定超时都停止。仅在成功响应的长度未命中时进行下一次尝试。命中后来源显示 `probe` 并停止；仅保存到选定绑定。观察模式只保存候选，不回灌。
+
+同一出口可能始终返回 312。次数用完会显示“未命中”，不会制造/截断 292，也不会自动切节点、更换账号或无限请求。状态长度只是一种实验性选择规则，不是有效性验证；探测也不能解决 Sub2API 内部账号切换的隔离问题。已有正常生成可能因同会话路由实验受到影响，应先用于已验证的单账号/粘性链路。
+
+```bash
+sudo turnstate probe-status
+# 从状态输出选择已有 binding id（不含明文密钥）
+sudo turnstate probe-start --model gpt-6-astra --binding BINDING_ID --attempts 3 --ack-billable --ack-experimental
+sudo turnstate probe-stop
+```
+
+关闭处理、改规则、手动刷新/替换、停止服务都会取消未完成探测；不会在服务启动、重启或倒计时结束后自动恢复/重复探测。
+
+转发记录新增“请求 → 响应声明模型”。请求模型是进入扩展时 JSON 中的值，扩展原样转发该正文。响应模型来自有界、只读的 SSE/JSON 元数据检查，缺失时显示未识别，不能用来证明底层运行模型的身份。不会为识别模型缓冲整个响应。
 
 ## 控制命令
 

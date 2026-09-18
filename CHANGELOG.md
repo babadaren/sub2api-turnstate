@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Add administrator-confirmed, bounded active probes for an exact configured model and state length.
+- Support one-shot reuse of the next successful request from an explicitly selected binding, or manual memory-only credentials. No prompt capture or durable key storage.
+- Preserve Sub2API egress proxy/account configuration; no redirects, node switching or retries on auth/quota/timeout/model mismatch.
+- Pin only a matching response model and target length to the exact API-key/model/session/turn binding. Stop on hit, cancel, budget exhaustion, rule change or service stop.
+- Add requested/forwarded/response-declared model metadata to records; keep streaming bytes unchanged.
+- Include dashboard progress, attempt history and CLI start/status/stop. Normal TTL refresh remains passive.
+
 ## 0.2.1
 
 - Fix unversioned `/responses` and `/responses/compact` bypassing the Nginx takeover and extension records.
