@@ -7,7 +7,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { makeConfig, validateConfig } from '../lib/config.mjs';
 import { createExtension } from '../lib/server.mjs';
-import { inspectState, cleanHeaders } from '../lib/policy.mjs';
+import { inspectState, cleanHeaders, routeName } from '../lib/policy.mjs';
 
 const password = 'preview-test-password-123!';
 const bodyOf = async req => { const chunks = []; for await (const c of req) chunks.push(c); return Buffer.concat(chunks); };
@@ -38,6 +38,37 @@ test('policy never pins 292 or fabricates missing state; unknown lengths pass', 
   assert.equal(inspectState('B'.repeat(312), 'drop312').remove, true);
   assert.equal(inspectState('B'.repeat(312), 'off').remove, false);
   assert.equal(inspectState('B'.repeat(312), 'drop312', false).remove, false);
+});
+test('versioned and unversioned Responses aliases are recognized without exposing queries or IDs', () => {
+  for (const base of ['/responses', '/v1/responses']) {
+    assert.equal(routeName(base), base);
+    assert.equal(routeName(base + '?private=hidden'), base);
+    assert.equal(routeName(base + '/'), base);
+    assert.equal(routeName(base + '/compact'), base + '/compact');
+    assert.equal(routeName(base + '/resp_private_id'), base);
+  }
+  for (const route of ['/responses-other','/response','/v1/chat/completions','/admin/responses','/api/responses']) assert.equal(routeName(route), null);
+});
+test('unversioned Responses forwards the original path and logs the actual model without changing headers in observe', async t => {
+  const seen = [];
+  const f = await fixture(t, async (req, res) => {
+    seen.push({ path: req.url, state: req.headers['x-codex-turn-state'], payload: JSON.parse((await bodyOf(req)).toString()) });
+    res.writeHead(200, { 'x-codex-turn-state': 'S'.repeat(287) }); res.end('ok');
+  });
+  for (const [route,model] of [['/responses','gpt-6-astra'],['/responses/compact','gpt-5.6-sol'],['/v1/responses','gpt-5.6-terra']]) {
+    const response = await fetch(`${f.proxy}${route}?private=not-in-logs`, { method:'POST', headers: { 'content-type':'application/json', 'x-codex-turn-state':'Q'.repeat(292) }, body:JSON.stringify({model,input:'private-prompt'}) });
+    assert.equal(response.status,200); assert.equal(await response.text(),'ok');
+    assert.equal(response.headers.get('x-codex-turn-state').length,287);
+    assert.equal(seen.at(-1).path,route+'?private=not-in-logs');
+    assert.equal(seen.at(-1).state.length,292);
+    const record=f.app.journal.recent.filter(r => r.kind === 'request').at(-1);
+    assert.equal(record.path,route); assert.equal(record.model,model);
+    assert.equal(record.requestStateLength,292); assert.equal(record.responseStateLength,287);
+  }
+  assert.equal(f.app.journal.total.requests,3);
+  await f.app.journal.flush();
+  const log=fs.readFileSync(path.join(f.home,'records.jsonl'),'utf8');
+  assert.equal(log.includes('private-prompt'),false); assert.equal(log.includes('private=not-in-logs'),false);
 });
 test('config rejects remote origins and self-proxy loops', () => {
   const { config } = makeConfig({ password });

@@ -12,5 +12,5 @@
 <section><h2>实际状态头长度分布</h2><p class="hint">0 表示缺少状态头。请求、响应分别统计。模型无法从请求识别时不会默认归入 gpt-6-astra。</p><div class="table-wrap"><table><thead><tr><th>模型</th><th>请求长度 : 次数</th><th>响应长度 : 次数</th><th>最近出现</th></tr></thead><tbody id="observed"></tbody></table></div></section>
 <section><div class="row"><h2>最近转发记录</h2><label>筛选<select id="filter"><option value="">全部事件</option><option value="request">请求</option><option value="state">状态更新</option><option value="admin">管理操作</option></select></label></div><p class="hint">不记录 API Key、Cookie、提示词、回答或完整状态。完整固定值仅管理员点选后显示。WebSocket 只统计握手，无法从后续帧补改已经发出的握手头；未知模型握手不固定。超过 1 MiB / 编码的请求正文原样转发，不参与模型固定。</p><div class="table-wrap"><table><thead><tr><th>时间</th><th>事件 / 请求</th><th>模型</th><th>状态</th><th>请求 state</th><th>响应 state</th><th>首响应头</th><th>动作</th></tr></thead><tbody id="records"></tbody></table></div></section>
 <details><summary>边界与运行说明</summary><p id="notice" class="hint"></p><p>停止处理不停止守护进程。停止服务 / 卸载应使用 SSH 的 turnstate service-stop / uninstall，先撤销 Nginx 接管。刷新等待新响应，不代表会绕过账号或上游配额限制。</p></details>
-</div><p id="message" role="status"></p><footer>v0.2.0 · 数据只存本机 · 管理接口必须通过 HTTPS 或 SSH 隧道访问</footer>
+</div><p id="message" role="status"></p><footer>v0.2.1 · 数据只存本机 · 管理接口必须通过 HTTPS 或 SSH 隧道访问</footer>
 </main></body></html>

@@ -8,7 +8,7 @@
                                Sub2API 原有账号代理 → 上游
 ```
 
-**不替换 Sub2API 的账号代理，不修改 Docker 网络，也不读取系统代理变量。** 只处理 `/v1/responses` 路径族；其他流量保持原入口路由。完全撤销接管后，Nginx 恢复直接访问 Sub2API。
+**不替换 Sub2API 的账号代理，不修改 Docker 网络，也不读取系统代理变量。** 同时处理 `/responses` 和 `/v1/responses` 路径族（包括 `/compact`）；不改写这两类请求原有的上游路径。其他流量保持原入口路由。完全撤销接管后，Nginx 恢复直接访问 Sub2API。
 
 ## 安装
 
@@ -19,7 +19,7 @@ GitHub Release 提供标准 npm tarball；这是 **GitHub 发布资产，不代�
 ```bash
 # 建议使用私有 prefix，避免与系统已有 CLI 冲突。
 npm install -g --prefix /opt/sub2api-turnstate/npm --ignore-scripts \
-  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.2.0/babadaren-sub2api-turnstate-0.2.0.tgz
+  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.2.1/babadaren-sub2api-turnstate-0.2.1.tgz
 
 # 使用 Node 22+ 运行安装入口。安装会创建 systemd 服务、自动启动并设置开机启动。
 # --nginx-conf 指向你现有的 Sub2API 反向代理配置。

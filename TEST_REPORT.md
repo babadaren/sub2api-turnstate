@@ -1,4 +1,15 @@
-# v0.2.0 validation
+# Validation history
+
+## v0.2.1 — 2026-09-18
+
+- Root cause: unversioned `/responses` calls went directly to Sub2API because both the Nginx map and the extension classifier matched only `/v1/responses`.
+- Added route classification and model/record tests for `/responses`, `/responses/compact`, and versioned aliases. Original upstream paths are preserved; queries and response IDs are not exposed in records.
+- Re-tested on Ubuntu 20.04, Node.js 22.23.2 and Nginx 1.18.0 with mock upstreams and temporary ports: `npm run check` passed; **26 tests passed, 0 failed, 0 skipped**.
+- Local Windows syntax checks and alias tests passed. The full Linux-targeted suite on Windows has one POSIX file-permission assertion failure and skips real Nginx; the permission and Nginx tests both passed on Linux.
+- Deployed v0.2.1 with reversible Nginx detachment/reconnection, keeping the existing runtime mode and model rules. Unauthenticated requests to `/responses`, `/responses/compact`, and `/v1/responses` all reached the extension, were recorded, and received the expected Sub2API 401 without an upstream generation. The original Sub2API health check passed.
+- At the first post-upgrade check, there was no new successful real-model request yet. The route probes above are not represented as successful model invocations or a captured fixed state.
+
+## v0.2.0 validation
 
 Executed in an isolated Linux development environment with Node.js 22.16.0 and Nginx.
 

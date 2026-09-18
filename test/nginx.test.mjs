@@ -80,6 +80,13 @@ test('real nginx: rewritten paths, direct non-Codex route, backup on refused con
   let response = await fetch(`${url}/openai/v1/responses`, { method: 'POST', headers: { 'x-codex-turn-state': 'Q'.repeat(312) }, body: '{}' });
   assert.equal(response.status, 200); assert.equal((await response.json()).path, '/v1/responses');
   assert.equal(seen.at(-1).state, undefined); assert.equal(response.headers.has('x-codex-turn-state'), false);
+  for (const alias of ['/responses', '/responses/compact', '/responses?probe=alias']) {
+    response = await fetch(`${url}${alias}`, { method: 'POST', headers: { 'x-codex-turn-state': 'Q'.repeat(312) }, body: '{}' });
+    assert.equal(response.status, 200); assert.equal((await response.json()).path, alias);
+    assert.equal(seen.at(-1).state, undefined);
+    assert.equal(response.headers.has('x-codex-turn-state'), false);
+    assert.equal(app.journal.recent.at(-1).path, alias.split('?')[0]);
+  }
   response = await fetch(`${url}/openai/responses`, { method: 'POST', body: '{}' });
   assert.equal(response.status, 200); assert.equal((await response.json()).path, '/v1/responses');
   response = await fetch(`${url}/api/v1/status`, { headers: { 'x-codex-turn-state': 'Q'.repeat(312) } }); await response.text();
