@@ -19,7 +19,7 @@ GitHub Release 提供标准 npm tarball；这是 **GitHub 发布资产，不代�
 ```bash
 # 建议使用私有 prefix，避免与系统已有 CLI 冲突。
 npm install -g --prefix /opt/sub2api-turnstate/npm --ignore-scripts \
-  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.3.0/babadaren-sub2api-turnstate-0.3.0.tgz
+  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.3.1/babadaren-sub2api-turnstate-0.3.1.tgz
 
 # 使用 Node 22+ 运行安装入口。安装会创建 systemd 服务、自动启动并设置开机启动。
 # --nginx-conf 指向你现有的 Sub2API 反向代理配置。
@@ -66,7 +66,7 @@ sudo turnstate domain-enable --domain state.example.com --apply
 
 ## 多模型规则
 
-模型来自 HTTP JSON 正文中的 `model`，而不是从不透明的 state 字符串“猜”出来。模型为空、无法识别、编码正文或正文超过 1 MiB 时，不套用默认模型；请求字节仍原样转发。超过检查上限的请求以有界缓冲 + 流式转发处理。
+模型来自 HTTP JSON 正文中的 `model`，而不是从不透明的 state 字符串“猜”出来。模型为空、无法识别、编码正文或正文超过 8 MiB 时，不套用默认模型；请求字节仍原样转发。超过检查上限的请求以有界缓冲 + 流式转发处理。
 
 控制台可新增任意模型，包括 `gpt-5.6-sol` 等自定义上游名称。预置规则如下；这些名称是否由上游提供，须由你的服务确定：
 
@@ -193,3 +193,14 @@ npm pack --ignore-scripts
 测试覆盖多模型不同长度、凭据 / 会话隔离、计时过期、手动刷新、在途响应隔离、持久化、管理员鉴权、SSE、WebSocket、原样透传与真实 Nginx 回滚 / fallback。
 
 仓库提供 GitHub Actions CI 和 Release 打包工作流。默认仅发布 GitHub Release；npm registry 发布需要仓库所有者另行设置发布身份 / OIDC，不包含任何发布 token。
+
+
+## v0.3.1: model inspection diagnostics
+
+Long requests are not model switches. The old 1 MiB JSON inspection ceiling could leave a valid model blank. The default request inspection ceiling is now 8 MiB; normal forwarding response diagnostics inspect up to 4 MiB rather than 64 KiB. Four concurrent request readers and four response readers bound memory. Oversized, encoded or busy requests still forward unchanged without guessing a model. Active probes retain their existing independent byte/request budgets.
+
+Optional fields in the private `config.json` are `requestMetadataMaxBytes` (default 8388608), `responseMetadataMaxBytes` (default 4194304), and `metadataConcurrency` (default 4). Each byte limit must be 65536..16777216; the combined configured byte budget multiplied by concurrency cannot exceed 128 MiB. Restart the service safely after editing. These limits bound inspected bytes, not exact process RSS; parsing and transport add overhead.
+
+New records contain `requestModelReason`, `responseModelReason`, response completion/failure flags and a validated upstream request ID where available. The console distinguishes body limits, response inspection limits, missing model fields, compressed bodies, concurrency bypass, and historical records lacking diagnostics. It never replaces a missing response model with the request model. Old log records are not retroactively rewritten.
+
+The 292/312 presets remain an opt-in heuristic, not a protocol validity test. HTTP 200 alone also does not guarantee a successful SSE completion. Compare `responseCompleted`, `responseFailed`, application errors and real same-turn continuation behaviour. The repair does not change your model policies, start probes, replace outbound proxies or obtain a 292 value automatically.

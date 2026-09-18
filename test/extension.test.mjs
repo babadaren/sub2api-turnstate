@@ -126,11 +126,12 @@ test('non-Codex requests bypass policy unchanged', async t => {
   assert.equal(f.app.journal.total.requests, 0);
 });
 test('large request is streamed intact and not rejected by log parsing limit', async t => {
-  const payload = JSON.stringify({ model: 'large-test', input: 'x'.repeat(2 * 1024 * 1024) });
+  const payload = JSON.stringify({ model: 'large-test', input: 'x'.repeat(9 * 1024 * 1024) });
   const f = await fixture(t, async (req, res) => { assert.equal((await bodyOf(req)).toString(), payload); res.end('ok'); });
   const response = await fetch(`${f.proxy}/v1/responses`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: payload });
   assert.equal(await response.text(), 'ok');
   assert.equal(f.app.journal.recent.at(-1).model, null);
+  assert.equal(f.app.journal.recent.at(-1).requestModelReason, 'body_too_large');
 });
 test('SSE first chunk reaches client before upstream response is finished', async t => {
   let release;

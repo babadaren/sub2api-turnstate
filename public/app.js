@@ -15,6 +15,19 @@ function showLogin() { authenticated = false; csrf = ''; clearSecrets(); $('dash
 function button(label, handler, secondary = true) { const b = text('button', label); if (secondary) b.className = 'secondary'; b.onclick = () => Promise.resolve().then(handler).catch(e => notify(e.message)); return b; }
 function cells(row, values) { for (const value of values) row.append(text('td', value)); }
 function time(value) { return value ? new Date(value).toLocaleString() : '—'; }
+const modelReasons = {
+  body_too_large: '请求正文超过解析上限', encoded_body: '压缩正文未解析', inspection_busy: '解析并发已满，原样透传',
+  invalid_json: '不是完整 JSON', missing_model: '请求未提供 model', invalid_model: 'model 格式不受支持',
+  no_json_body: '此请求无 JSON 模型正文', not_inspected: '未参与解析', websocket_handshake: 'WebSocket 握手无模型正文',
+  metadata_limit: '响应超出诊断读取上限', encoded_response: '压缩响应未解析', unsupported_response_type: '非 JSON/SSE 响应',
+  invalid_response_json: '诊断范围内 JSON 不完整', model_missing: '诊断范围内未读到模型声明', no_response: '尚未收到响应'
+};
+function modelRecord(r) {
+  if (r.kind !== 'request') return r.model || '不适用（管理事件）';
+  const request = r.requestedModel || r.model || `请求未识别：${modelReasons[r.requestModelReason] || '旧记录未保存解析原因'}`;
+  const response = r.responseModel || `响应未识别：${modelReasons[r.responseModelReason] || '旧记录未保存解析原因'}`;
+  return request + ' → ' + response;
+}
 function renderRules() {
   const rows = [];
   for (const [model, rule] of Object.entries(rules)) {
@@ -74,7 +87,7 @@ async function refresh() {
     stateData = data; serverOffset = data.serverTime - Date.now(); rules = data.rules; renderRules(); renderPins(data);
     if (data.persistError) notify('警告：状态文件写入失败，目前只保存在内存中，请检查磁盘和权限。');
     $('observed').replaceChildren(...data.observed.map(o => { const tr = document.createElement('tr'); cells(tr, [o.model,histogram(o.requestLengths),histogram(o.responseLengths),time(o.lastSeen)]); return tr; }));
-    $('records').replaceChildren(...logs.records.map(r => { const tr = document.createElement('tr'); cells(tr, [time(r.time),r.kind === 'request' ? `${r.method} ${r.path}` : `${r.kind} / ${r.action}`,r.model ? `${r.model} → ${r.responseModel || '响应未识别'}` : '—',r.status,
+    $('records').replaceChildren(...logs.records.map(r => { const tr = document.createElement('tr'); cells(tr, [time(r.time),r.kind === 'request' ? `${r.method} ${r.path}` : `${r.kind} / ${r.action}`,modelRecord(r),r.status,
       r.requestStateLength === undefined ? '—' : `${r.requestStateLength} → ${r.forwardedStateLength}`,r.responseStateLength === undefined ? '—' : `${r.responseStateLength} → ${r.returnedStateLength}`,r.headersMs == null ? '—' : `${r.headersMs} ms`,[r.requestAction,r.responseAction,r.error].filter(Boolean).join(' / ')]); return tr; }));
   } finally { loading = false; }
 }

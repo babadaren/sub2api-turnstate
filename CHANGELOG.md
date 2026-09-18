@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+- Fix legitimate multi-megabyte request models disappearing from diagnostics (8 MiB bounded default).
+- Raise normal response inspection to 4 MiB; retain tighter active-probe budgets.
+- Add configurable inspection concurrency/memory budgets and explicit missing-model reason codes.
+- Record response completion/failure and validated upstream request IDs, never prompt text or credentials.
+- Show missing-model reasons in the console instead of implying a model swap.
+- Keep routing, model rules, length policies, outbound proxy and probe execution unchanged.
+
+
 ## 0.3.0
 
 - Add administrator-confirmed, bounded active probes for an exact configured model and state length.
