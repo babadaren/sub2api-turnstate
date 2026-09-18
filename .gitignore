@@ -1,0 +1,13 @@
+node_modules/
+*.tgz
+*.zip
+*.log
+coverage/
+config.json
+runtime.json
+rules.json
+states.json
+records.jsonl*
+initial-admin-password*
+.env*
+!*.example
