@@ -110,13 +110,30 @@ async function install() {
     print(connectNginx(conf, config));
   }
   if (arg('domain')) print(domainSetup(arg('domain'), config, false));
-  print({ installed: true, mode: 'observe (unless previously configured)', dashboardOrigin: config.adminOrigin,
+  print({ installed: true, mode: 'off on fresh install; existing switch retained', dashboardOrigin: config.adminOrigin,
     nginxTakenOver: !!conf, note: 'The original Sub2API egress proxy was not modified.' });
 }
 async function main() {
   if (command === '--version' || command === 'version') return print(VERSION);
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Node.js 22+ is required; no system runtime is upgraded automatically.');
-  if (command === 'help' || command === '--help') return print(`turnstate ${VERSION}\n\ninit [--home DIR] [--admin-origin https://stats.example.com] [--password-stdin]\nserve [--home DIR]                    Run foreground; no production route changes\ninstall --apply [--nginx-conf FILE]   Install systemd, auto-start; optionally take over Nginx\nstatus | doctor                      Read service status\nstart | enable                       Enable observation (does not rewrite headers)\nstop | disable                       Disable processing; keep transparent relay + dashboard\nmode pin --ack-experimental           Enable opt-in, scoped per-model pin/replay\nstates                               Show model rules, observations and masked bindings\npreflight-status                      Inspect request-time admission jobs\npreflight-config --file FILE --ack-billable --ack-experimental\n                                      Enable bounded request-time preflight\npreflight-disable                     Disable all preflight model gates\nprobe-status | probe-stop              Inspect/cancel bounded active probes\nprobe-budget [--per-hour N --ack-billable --ack-experimental]\n                                      Inspect/set shared rolling-hour quota (keeps usage)\nprobe-start --model NAME --binding ID --attempts 50 --max-run-seconds 600 --ack-billable --ack-experimental\n                                      Arm one probe after a matching real successful request\nrefresh --model NAME                 Invalidate that model; await the next real response\nrules --file FILE --ack-experimental  Apply a JSON model-rule object\ndomain-enable --domain NAME --apply   Activate HTTPS after DNS points to this server\nnginx-plan --nginx-conf FILE          Print reviewable candidate; write nothing\nconnect --nginx-conf FILE --apply     Back up, test, reload; rollback on failure\ndisconnect --apply                    Restore pre-takeover config; daemon remains running\nservice-stop --apply                  Disconnect Nginx BEFORE stopping daemon\nuninstall --apply                     Disconnect, stop and remove service; keep data/backups\nnginx-dashboard --domain NAME         Print HTTPS admin site template (DNS/cert required)\npassword [--password-stdin]           Reset password; restart service afterward\n\nNo postinstall side effects. No GitHub/npm publication is performed by this package.\n`);
+  if (command === 'help' || command === '--help') return print(`turnstate ${VERSION}
+
+start / enable      Enable automatic probe + pin on matching requests (billable).
+stop / disable      Cancel probes; relay pending/new requests without state changes.
+status / doctor     Show health and the single switch state.
+auto-status         Show automatic discovery and cache activity.
+states              Show configured model rules and masked pins.
+refresh --model X   Invalidate cached state; next matching request probes automatically.
+rules --file FILE --ack-experimental  Update per-model state formats.
+install --apply --nginx-conf FILE [--domain NAME] [--admin-origin ORIGIN]
+connect --nginx-conf FILE --apply / disconnect --apply
+service-stop --apply / uninstall --apply
+domain-enable --domain NAME --apply
+init [--home DIR] / serve [--home DIR]
+password --password-stdin / nginx-plan --nginx-conf FILE
+
+No manual probing, batch limits, total duration or shared quota settings.
+`);
   if (command === 'init') { initialize(); return; }
   if (command === 'install') return install();
   if (command === 'disconnect') { requireRoot(); return print(disconnectNginx()); }
@@ -163,32 +180,8 @@ async function main() {
   if (command === 'status') return print(await ready(config));
   if (command === 'domain-enable') { requireRoot(); return print(domainSetup(arg('domain'), config, true)); }
   if (command === 'states') return print(await localRequest(config.adminPort, '/api/states', config));
-  if(command==='preflight-status')return print(await localRequest(config.adminPort,'/api/preflight',config));
-  if(command==='preflight-config') {
-    const file=arg('file');if(!file)throw new Error('--file is required');
-    return print(await localRequest(config.adminPort,'/api/preflight/config',config,{rules:JSON.parse(fs.readFileSync(file,'utf8')),acknowledgeBillable:has('ack-billable'),acknowledgeExperimental:has('ack-experimental')}));
-  }
-  if(command==='preflight-disable') {
-    const data=await localRequest(config.adminPort,'/api/preflight',config);
-    for(const r of Object.values(data.rules))r.enabled=false;
-    return print(await localRequest(config.adminPort,'/api/preflight/config',config,{rules:data.rules}));
-  }
-  if (command === 'probe-status') return print(await localRequest(config.adminPort, '/api/probes', config));
-  if (command === 'probe-budget') {
-    if (!arg('per-hour')) return print(await localRequest(config.adminPort, '/api/probes/budget', config));
-    if (!has('ack-billable') || !has('ack-experimental')) throw new Error('Budget changes require --ack-billable --ack-experimental.');
-    return print(await localRequest(config.adminPort, '/api/probes/budget', config, { maxAttemptsPerHour: Number(arg('per-hour')),
-      acknowledgeBillable: true, acknowledgeExperimental: true }));
-  }
-  if (command === 'probe-stop') return print(await localRequest(config.adminPort, '/api/probes/stop', config, {}));
-  if (command === 'probe-start') {
-    if (!has('ack-billable') || !has('ack-experimental')) throw new Error('Probe start requires --ack-billable --ack-experimental.');
-    const body = has('input-stdin') ? JSON.parse(fs.readFileSync(0, 'utf8')) : {
-      source: 'next_request', model: arg('model'), bindingId: arg('binding'), maxAttempts: Number(arg('attempts', '3')), maxRunSeconds: Number(arg('max-run-seconds', '180'))
-    };
-    body.acknowledgeBillable = true; body.acknowledgeExperimental = true;
-    return print(await localRequest(config.adminPort, '/api/probes/start', config, body));
-  }
+  if (command === 'auto-status') return print(await localRequest(config.adminPort,'/api/automation',config));
+  if (/^(probe-|preflight-)/.test(command)) throw new Error('Legacy probe settings removed. Use turnstate start / stop / auto-status.');
   if (command === 'refresh') return print(await localRequest(config.adminPort, '/api/pins/refresh', config, { model: arg('model'), id: arg('id') }));
   if (command === 'rules') {
     if (!has('ack-experimental')) throw new Error('Rule changes require --ack-experimental.');
@@ -201,12 +194,9 @@ async function main() {
     try { origin = await localRequest(new URL(config.target).port || 80, '/health', config); } catch (error) { origin = { error: error.message }; }
     return print({ node: process.version, extension: service, sub2api: origin, egressProxy: 'not inspected or modified', mode: 'ingress-sidecar' });
   }
-  if (['start', 'enable', 'stop', 'disable', 'mode'].includes(command)) {
-    let desired = ['start', 'enable'].includes(command) ? 'observe' : 'off';
-    if (command === 'mode') desired = args[0];
+  if (['start','enable','stop','disable'].includes(command)) {
     if (command === 'start' && process.getuid?.() === 0 && fs.existsSync(UNIT)) { requireOwnedService(); systemctl('start', SERVICE); await delay(350); }
-    const body = { mode: desired, acknowledgeExperimental: has('ack-experimental') };
-    return print(await localRequest(config.adminPort, '/api/mode', config, body));
+    return print(await localRequest(config.adminPort,'/api/automation',config,{enabled:['start','enable'].includes(command)}));
   }
   throw new Error('Unknown command; run turnstate help');
 }

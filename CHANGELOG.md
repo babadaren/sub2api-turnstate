@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Replace manual probing, separate preflight switches, retry-count/time controls and shared quotas with one authenticated start/stop switch.
+- Automatic discovery on matching HTTP requests, reusing unexpired verified pins and re-probing after expiry. No batch cap, hourly quota or total task deadline; old quota files are not read.
+- Wrong model/length responses retry with automatic pacing while a real request is waiting. Success dispatches the unchanged original once; client disconnect or the global switch cancels probing.
+- Off is genuine transparent forwarding: no model-body inspection or late response-state rewriting. Disabling releases connected waiting originals unchanged, including stop/start races.
+- Keep existing pins, per-model lengths/expiry/scope, login, Nginx routes and Sub2API outbound proxies. Old pin mode migrates to auto; old off/observe modes stay off.
+- Keep resource limits, single-connection timeouts and explicit authentication/network errors. Remove obsolete manual/quota engines and API controls (410); keep the model format editor under a collapsed optional section.
+- New tests cover 105 consecutive routing misses before a hit, switch/cancellation races, preserved state migration and ignored legacy quota files, plus transport/security/Nginx regressions.
+
 ## 0.4.1
 
 - Manual and request-time probes retry successful-HTTP model mismatches as well as length misses. Exact model/length and completion checks remain mandatory for adoption.

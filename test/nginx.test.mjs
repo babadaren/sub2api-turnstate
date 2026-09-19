@@ -61,7 +61,7 @@ test('real nginx: rewritten paths, direct non-Codex route, backup on refused con
   const { config: cfg } = makeConfig({ password: 'nginx-live-test-123!', target: `http://127.0.0.1:${origin.address().port}` });
   const app = await createExtension(cfg, home, { proxyPort: 0, adminPort: 0 });
   cfg.proxyPort = app.proxy.address().port; cfg.adminPort = app.admin.address().port;
-  app.setMode('drop312');
+  app.setMode('auto');
   const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
   const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
   const site = original.replaceAll('18080', String(origin.address().port)).replace('8088', String(port));
@@ -79,12 +79,12 @@ test('real nginx: rewritten paths, direct non-Codex route, backup on refused con
   const url = `http://127.0.0.1:${port}`;
   let response = await fetch(`${url}/openai/v1/responses`, { method: 'POST', headers: { 'x-codex-turn-state': 'Q'.repeat(312) }, body: '{}' });
   assert.equal(response.status, 200); assert.equal((await response.json()).path, '/v1/responses');
-  assert.equal(seen.at(-1).state, undefined); assert.equal(response.headers.has('x-codex-turn-state'), false);
+  assert.equal(seen.at(-1).state.length, 312); assert.equal(response.headers.get('x-codex-turn-state').length, 312);
   for (const alias of ['/responses', '/responses/compact', '/responses?probe=alias']) {
     response = await fetch(`${url}${alias}`, { method: 'POST', headers: { 'x-codex-turn-state': 'Q'.repeat(312) }, body: '{}' });
     assert.equal(response.status, 200); assert.equal((await response.json()).path, alias);
-    assert.equal(seen.at(-1).state, undefined);
-    assert.equal(response.headers.has('x-codex-turn-state'), false);
+    assert.equal(seen.at(-1).state.length, 312);
+    assert.equal(response.headers.get('x-codex-turn-state').length, 312);
     assert.equal(app.journal.recent.at(-1).path, alias.split('?')[0]);
   }
   response = await fetch(`${url}/openai/responses`, { method: 'POST', body: '{}' });
@@ -96,12 +96,11 @@ test('real nginx: rewritten paths, direct non-Codex route, backup on refused con
   assert.equal(response.status, 502); assert.equal(seen.length, before + 1);
   // A generated 503 from strict preflight must NOT fall through to the backup
   // and submit the original POST despite the admission failure.
-  app.setMode('pin');
-  app.preflight.configure({'gpt-6-astra':{enabled:true}},true);
+  // Auto is already on: astra admission runs without any second enable switch.
   const gateBefore=seen.length;
   response=await fetch(`${url}/v1/responses`,{method:'POST',headers:{authorization:'Bearer fake-key','session-id':'gate-test','content-type':'application/json'},body:JSON.stringify({model:'gpt-6-astra',input:'original must not be sent'})});
   assert.equal(response.status,503);await response.text();assert.equal(seen.length,gateBefore+1);
-  app.preflight.configure({'gpt-6-astra':{enabled:false}});app.setMode('drop312');
+  app.setMode('off');
   await app.close(100); closed = true;
   response = await fetch(`${url}/v1/responses`, { method: 'POST', headers: { 'x-codex-turn-state': 'Q'.repeat(312) }, body: '{}' });
   assert.equal(response.status, 200); await response.text(); assert.equal(seen.at(-1).state.length, 312);

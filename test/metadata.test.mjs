@@ -15,7 +15,7 @@ async function fixture(t, handler, options={}) {
  const origin=http.createServer(handler), sockets=new Set();
  origin.on('connection',s=>{sockets.add(s);s.on('close',()=>sockets.delete(s));});
  origin.listen(0,'127.0.0.1');await once(origin,'listening');
- const {config}=makeConfig({password:'metadata-private-test-password',target:`http://127.0.0.1:${origin.address().port}`,...options});
+ const {config}=makeConfig({password:'metadata-private-test-password',target:`http://127.0.0.1:${origin.address().port}`,mode:'auto',...options});
  const app=await createExtension(config,home,{proxyPort:0,adminPort:0});
  config.proxyPort=app.proxy.address().port;config.adminPort=app.admin.address().port;
  config.adminOrigin=`http://127.0.0.1:${config.adminPort}`;
@@ -73,7 +73,7 @@ test('metadata concurrency guard bypasses rather than rejecting an additional re
  assert.equal(busy,true);
  const second=await fetch(f.url+'/responses',{method:'POST',body:'{"model":"gpt-6-astra"}'});assert.equal(await second.text(),'ok');
  const record=f.app.journal.recent.findLast(r=>r.kind==='request');assert.equal(record.requestModelReason,'inspection_busy');assert.equal(record.model,null);
- held.end('"model":"gpt-6-astra"}');
+ held.end('"model":"metadata-only-model"}');
 });
 test('old configs gain bounded defaults; oversized concurrency budgets are rejected',()=>{
  const {config}=makeConfig({password:'metadata-private-test-password'});

@@ -1,113 +1,22 @@
 'use strict';
-const $ = id => document.getElementById(id);
-let csrf = '', authenticated = false, rules = {}, stateData = null, loading = false, serverOffset = 0;
-const modeName = { off: '停止处理 / 透传', observe: '观察 / 不改写', pin: '模型固定 / 回灌', drop312: '旧版实验过滤' };
-const text = (tag, value, cls) => { const el = document.createElement(tag); el.textContent = value ?? '—'; if (cls) el.className = cls; return el; };
-const notify = message => { $('message').textContent = message; };
-function clearSecrets() { document.querySelectorAll('.revealed-state').forEach(e => e.remove()); }
-async function api(route, body) {
-  const response = await fetch(route, { credentials: 'same-origin', cache: 'no-store', ...(body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify(body) }) });
-  const result = await response.json();
-  if (!response.ok) { if (response.status === 401) showLogin(); throw new Error(result.error || `HTTP ${response.status}`); }
-  return result;
-}
-function showLogin() { authenticated = false; csrf = ''; clearSecrets(); $('dashboard').hidden = true; $('login').hidden = false; $('badge').textContent = '未登录'; $('pins').replaceChildren(); }
-function button(label, handler, secondary = true) { const b = text('button', label); if (secondary) b.className = 'secondary'; b.onclick = () => Promise.resolve().then(handler).catch(e => notify(e.message)); return b; }
-function cells(row, values) { for (const value of values) row.append(text('td', value)); }
-function time(value) { return value ? new Date(value).toLocaleString() : '—'; }
-const modelReasons = {
-  body_too_large: '请求正文超过解析上限', encoded_body: '压缩正文未解析', inspection_busy: '解析并发已满，原样透传',
-  invalid_json: '不是完整 JSON', missing_model: '请求未提供 model', invalid_model: 'model 格式不受支持',
-  no_json_body: '此请求无 JSON 模型正文', not_inspected: '未参与解析', websocket_handshake: 'WebSocket 握手无模型正文',
-  metadata_limit: '响应超出诊断读取上限', encoded_response: '压缩响应未解析', unsupported_response_type: '非 JSON/SSE 响应',
-  invalid_response_json: '诊断范围内 JSON 不完整', model_missing: '诊断范围内未读到模型声明', no_response: '尚未收到响应'
-};
-function modelRecord(r) {
-  if (r.kind !== 'request') return r.model || '不适用（管理事件）';
-  const request = r.requestedModel || r.model || `请求未识别：${modelReasons[r.requestModelReason] || '旧记录未保存解析原因'}`;
-  const response = r.responseModel || `响应未识别：${modelReasons[r.responseModelReason] || '旧记录未保存解析原因'}`;
-  return request + ' → ' + response;
-}
-function renderRules() {
-  const rows = [];
-  for (const [model, rule] of Object.entries(rules)) {
-    const tr = document.createElement('tr'); cells(tr, [model, rule.enabled ? '启用' : '关闭', rule.pinLengths.join(', ') || (rule.autoLearn ? '自动学习' : '未配置'), rule.discardLengths.join(', ') || '无', `${rule.ttlSeconds} 秒`, rule.scope]);
-    const td = document.createElement('td'); td.append(button('编辑', () => editRule(model)), button('刷新该模型', () => refreshPin({ model }))); tr.append(td); rows.push(tr);
-  }
-  $('rules').replaceChildren(...rows);
-}
-function editRule(model = '') {
-  const form = $('rule-form'), rule = rules[model] || { pinLengths: [], discardLengths: [], ttlSeconds: 300, scope: 'session', unknownPolicy: 'pass', enabled: false, autoLearn: false };
-  form.hidden = false; form.elements.model.value = model; form.elements.model.readOnly = !!model;
-  for (const name of ['pinLengths','discardLengths']) form.elements[name].value = rule[name].join(',');
-  for (const name of ['ttlSeconds','scope','unknownPolicy']) form.elements[name].value = rule[name];
-  for (const name of ['enabled','autoLearn']) form.elements[name].checked = rule[name];
-  form.scrollIntoView({ block: 'center', behavior: 'smooth' });
-}
-async function refreshPin(identity) {
-  const result = await api('/api/pins/refresh', identity);
-  notify(`已失效 ${result.count} 条旧绑定，等待下一条匹配的成功响应获取新值；未发送探测请求。`); await refresh();
-}
-function countdown() {
-  for (const el of document.querySelectorAll('[data-expires]')) {
-    const remaining = Math.max(0, Math.ceil((Number(el.dataset.expires) - (Date.now() + serverOffset)) / 1000));
-    el.textContent = remaining ? `${Math.floor(remaining / 60)} 分 ${remaining % 60} 秒后失效 / 待刷新` : '等待新响应（旧值不再回灌）';
-  }
-}
-function renderPins(data) {
-  const cards = data.pins.map(pin => {
-    const card = text('article', '', 'pin-card');
-    card.append(text('h3', pin.model), text('p', `${pin.length} 字节 · ${data.mode === 'pin' && pin.status === 'candidate' ? '固定中' : pin.status === 'candidate' ? '候选（未回灌）' : '待刷新'}`, 'pin-label'), text('code', pin.preview));
-    const clock = text('p', ''); clock.dataset.expires = pin.expiresAt; card.append(clock);
-    card.append(text('p', `隔离：${pin.scope} · 客户标识 ${pin.client} · 会话 ${pin.session || '—'}`, 'hint'), text('p', `指纹 ${pin.fingerprint} · 采集 ${time(pin.capturedAt)} · 来源 ${pin.source} · 前置缓存：${pin.verifiedModel === pin.model ? '响应模型已核对' : '未核对'}`, 'hint'));
-    const actions = text('div', '', 'buttons');
-    actions.append(button('查看完整值', async () => {
-      const old = card.querySelector('.revealed-state'); if (old) { old.remove(); return; }
-      const result = await api('/api/pins/reveal', { id: pin.id }); const view = text('pre', result.state, 'revealed-state'); card.append(view);
-      setTimeout(() => view.remove(), 30000);
-    }), button('手动刷新', () => refreshPin({ id: pin.id })), button('手动替换', async () => {
-      const state = prompt('仅替换这一隔离绑定的值。请粘贴符合模型配置长度的状态；取消则不修改。');
-      if (!state) return;
-      if (!confirm('这是实验性手动固定，不能验证上游有效性。确认仅用于此绑定？')) return;
-      await api('/api/pins/set', { id: pin.id, state: state.trim(), acknowledgeExperimental: true }); notify('已手动替换固定值。'); await refresh();
-    })); card.append(actions); return card;
-  });
-  $('pins').replaceChildren(...(cards.length ? cards : [text('p', '尚无固定值。先让真实请求经过本服务；配置好模型长度和隔离范围后，从成功响应自动采集。', 'hint')])); countdown();
-}
-function histogram(value) { return Object.entries(value || {}).map(([length, count]) => `${length} : ${count}`).join(' / ') || '—'; }
-async function refresh() {
-  if (loading) return; loading = true;
-  try {
-    const status = await api('/api/status'); csrf = status.csrf || csrf; authenticated = true;
-    $('login').hidden = true; $('dashboard').hidden = false; $('badge').textContent = modeName[status.mode] || status.mode;
-    $('service-info').textContent = `版本 ${status.version} · 上游 ${status.target} · 启动 ${time(status.startedAt)}`;
-    for (const [id,key] of [['requests','requests'],['failures','failures'],['removed','removedHeaders']]) $(id).textContent = status.counters[key];
-    $('active').textContent = status.active; $('notice').textContent = status.notice;
-    const [data, logs] = await Promise.all([api('/api/states'), api('/api/records?limit=100&kind=' + encodeURIComponent($('filter').value))]);
-    stateData = data; serverOffset = data.serverTime - Date.now(); rules = data.rules; renderRules(); renderPins(data);
-    if (data.persistError) notify('警告：状态文件写入失败，目前只保存在内存中，请检查磁盘和权限。');
-    $('observed').replaceChildren(...data.observed.map(o => { const tr = document.createElement('tr'); cells(tr, [o.model,histogram(o.requestLengths),histogram(o.responseLengths),time(o.lastSeen)]); return tr; }));
-    $('records').replaceChildren(...logs.records.map(r => { const tr = document.createElement('tr'); cells(tr, [time(r.time),r.kind === 'request' ? `${r.method} ${r.path}` : `${r.kind} / ${r.action}`,modelRecord(r),r.status,
-      r.requestStateLength === undefined ? '—' : `${r.requestStateLength} → ${r.forwardedStateLength}`,r.responseStateLength === undefined ? '—' : `${r.responseStateLength} → ${r.returnedStateLength}`,r.headersMs == null ? '—' : `${r.headersMs} ms` + (r.preflight?.waitMs ? `（前置等待 ${r.preflight.waitMs} ms）` : ''),[r.requestAction,r.responseAction,r.error,r.preflight?.handled ? ('preflight:'+r.preflight.action) : null].filter(Boolean).join(' / ')]); return tr; }));
-  } finally { loading = false; }
-}
-$('login-form').onsubmit = async event => { event.preventDefault(); try { const form = new FormData(event.target); const result = await api('/api/login', { username: form.get('username'), password: form.get('password') }); csrf = result.csrf; event.target.elements.password.value = ''; notify(''); await refresh(); } catch(e) { notify(e.message); } };
-$('rule-form').onsubmit = async event => {
-  event.preventDefault();
-  try {
-    const f = event.target.elements, list = value => value.trim() ? value.split(/[,，\s]+/).filter(Boolean).map(Number) : [];
-    if (!confirm('规则只以长度作兼容判断，不能判断上游真实有效性；修改会清除该模型旧绑定。确认保存？')) return;
-    const next = { ...rules, [f.model.value.trim()]: { enabled: f.enabled.checked, pinLengths: list(f.pinLengths.value), discardLengths: list(f.discardLengths.value), ttlSeconds: Number(f.ttlSeconds.value), scope: f.scope.value, unknownPolicy: f.unknownPolicy.value, autoLearn: f.autoLearn.checked } };
-    await api('/api/rules', { rules: next, acknowledgeExperimental: true }); event.target.hidden = true; notify('规则已保存，其他模型配置保持不变。'); await refresh();
-  } catch(e) { notify(e.message); }
-};
-$('new-rule').onclick = () => editRule(); $('cancel-rule').onclick = () => { $('rule-form').hidden = true; };
-async function setMode(mode) { if (mode === 'pin' && !confirm('开启后会按模型规则固定 / 回灌状态。前置扩展无法感知 sub2api 内部账号切换，请仅用于已验证的粘性会话链路。确认启用？')) return; await api('/api/mode', { mode, acknowledgeExperimental: true }); notify('模式已更新。'); await refresh(); }
-$('enable').onclick = () => setMode('observe').catch(e => notify(e.message));
-$('pin-enable').onclick = () => setMode('pin').catch(e => notify(e.message));
-$('disable').onclick = () => setMode('off').catch(e => notify(e.message));
-$('refresh').onclick = () => refresh().catch(e => notify(e.message)); $('filter').onchange = $('refresh').onclick;
-$('logout').onclick = async () => { try { await api('/api/logout', {}); } finally { showLogin(); } };
-setInterval(() => { if (authenticated && !document.hidden) refresh().catch(e => notify(e.message)); }, 5000);
-setInterval(countdown, 1000);
-refresh().catch(() => {});
+const $=id=>document.getElementById(id);
+let authenticated=false,enabled=false,csrf='',loading=false,switchBusy=false,rules={},serverOffset=0,revealed=null;
+const names={probing:'正在自动探测',retrying:'未命中，继续探测',found:'已固定',disabled:'已关闭 / 原样透传',client_disconnected:'客户端已断开',configuration_changed:'规则已改变',model_mismatch:'响应模型未命中',length_miss:'长度未命中',http_401:'认证失败',http_403:'无权限',http_429:'上游限流',timeout:'单次连接超时',connection_error:'连接错误',response_failed:'响应失败',waiting_capacity:'等待队列已满',probe_capacity:'其他绑定正在探测',missing_binding:'缺少会话绑定',service_stopped:'服务停止',json_model:'已解析',processing_off:'已关闭，未解析',body_limit:'正文超出解析上限',encoded_body:'压缩正文未解析',inspection_busy:'解析繁忙',declared_model:'响应声明',metadata_limit:'响应诊断达到上限',no_response:'无响应'};
+function node(tag,value,cls){const e=document.createElement(tag);e.textContent=value??'—';if(cls)e.className=cls;return e;}
+function cells(tr,values){for(const v of values)tr.append(node('td',v));}
+function time(v){return v?new Date(v).toLocaleString():'—';}
+function note(s){$('message').textContent=s;}
+function forget(){revealed=null;document.querySelectorAll('.revealed-state').forEach(e=>e.remove());}
+function showLogin(){authenticated=false;enabled=false;csrf='';forget();$('dashboard').hidden=true;$('login').hidden=false;$('badge').textContent='未登录';$('pins').replaceChildren();}
+async function api(route,body){const r=await fetch(route,{credentials:'same-origin',cache:'no-store',...(body===undefined?{}:{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify(body)})});const d=await r.json();if(!r.ok){if(r.status===401)showLogin();throw new Error(d.error?.message||d.error||`HTTP ${r.status}`);}return d;}
+function button(label,fn){const b=node('button',label,'secondary');b.type='button';b.onclick=()=>Promise.resolve().then(fn).catch(e=>note(e.message));return b;}
+function clocks(){const now=Date.now()+serverOffset;document.querySelectorAll('[data-expires]').forEach(e=>{const n=Math.max(0,Math.ceil((Number(e.dataset.expires)-now)/1000));e.textContent=n?`${Math.floor(n/60)} 分 ${n%60} 秒后刷新`:(enabled?'已过期，下一条请求自动重取':'已过期，关闭中');});if(revealed&&Date.now()>=revealed.until)forget();}
+function pins(data){$('pins').replaceChildren(...(data.pins.length?data.pins.map(p=>{const c=node('article','','pin-card');const usable=p.status==='candidate'&&p.verifiedModel===p.model;c.append(node('h3',p.model),node('p',`${p.length} 字节 · ${usable?(enabled?'固定可用':'已保存，关闭中'):'待重新获取'}`,'pin-label'),node('code',p.preview));const clock=node('p','');clock.dataset.expires=p.expiresAt;c.append(clock,node('p',`采集 ${time(p.capturedAt)} · 来源 ${p.source} · 指纹 ${p.fingerprint}`,'hint'),node('p',`绑定 ${p.client} · ${p.scope} · 会话 ${p.session||'—'}`,'hint'));const actions=node('div','','buttons');actions.append(button('查看完整值',async()=>{forget();const d=await api('/api/pins/reveal',{id:p.id});revealed={id:p.id,state:d.state,until:Date.now()+30000,fingerprint:p.fingerprint};await refresh();}),button('刷新固定值',async()=>{forget();await api('/api/pins/refresh',{id:p.id});note('旧值已失效；启动状态下，下一条匹配请求将自动探测。');await refresh();}));c.append(actions);if(revealed?.id===p.id&&revealed.fingerprint===p.fingerprint)c.append(node('pre',revealed.state,'revealed-state'));return c;}):[node('p',enabled?'尚无固定值；下一条已配置模型请求到达后自动探测。':'已关闭；启动后自动处理目标请求。','hint')]));clocks();}
+function edit(model=''){const f=$('rule-form');f.hidden=false;f.elements.model.value=model;f.elements.model.readOnly=!!model;f.elements.pinLengths.value=rules[model]?.pinLengths.join(',')||'';f.elements.discardLengths.value=rules[model]?.discardLengths.join(',')||'';}
+async function refresh(){if(loading)return;loading=true;try{const s=await api('/api/status');csrf=s.csrf||csrf;authenticated=true;enabled=s.enabled;$('login').hidden=true;$('dashboard').hidden=false;$('badge').textContent=enabled?'已启动':'已关闭';$('switch-status').textContent=enabled?'自动探测与固定已启动':'已关闭状态处理';$('toggle').textContent=enabled?'关闭':'启动';$('toggle').disabled=switchBusy;$('toggle').className=enabled?'secondary':'';$('switch-description').textContent=enabled?'已有固定值直接使用；没有则自动探测，命中后发送原请求。':'所有新请求原样转发；不探测、不修改状态头。';$('service-info').textContent=`版本 ${s.version} · 上游 ${s.target} · 启动 ${time(s.startedAt)}`;$('requests').textContent=s.counters.requests;const [a,d,logs]=await Promise.all([api('/api/automation'),api('/api/states'),api('/api/records?limit=100')]);serverOffset=d.serverTime-Date.now();rules=d.rules;pins(d);$('waiting').textContent=a.waitingRequests;$('cache-hits').textContent=a.totals.cacheHits;$('found').textContent=a.totals.found;$('auto-summary').textContent=a.activeJobs.length?'原请求正在等待匹配的固定值。':'当前没有探测任务；目标请求到达时自动检查。';$('auto-records').replaceChildren(...[...a.activeJobs,...a.recent].map(j=>{const tr=document.createElement('tr');cells(tr,[time(j.startedAt),j.model,j.attempts,names[j.status]||j.status,j.lastResult?.responseModel||'—',j.lastResult?.length??'—',j.nextAttemptAt?`${Math.max(0,Math.ceil((j.nextAttemptAt-Date.now())/1000))} 秒后`:'—']);return tr;}));$('rules').replaceChildren(...Object.entries(rules).map(([m,r])=>{const tr=document.createElement('tr');cells(tr,[m,(r.enabled?'':'停用 · ')+(r.pinLengths.join(', ')||'未配置'),`${r.ttlSeconds} 秒`]);const td=document.createElement('td');td.append(button('编辑',()=>edit(m)));tr.append(td);return tr;}));$('records').replaceChildren(...logs.records.map(r=>{const tr=document.createElement('tr');const target=r.requestedModel||r.model;const textModel=target?`${target} → ${r.responseModel||names[r.responseModelReason]||'未声明'}`:(names[r.requestModelReason]||'—');cells(tr,[time(r.time),r.kind==='request'?`${r.method} ${r.path}`:`${r.kind} / ${r.action}`,textModel,r.status,r.requestStateLength===undefined?'—':`${r.requestStateLength} → ${r.forwardedStateLength}`,r.responseStateLength===undefined?'—':`${r.responseStateLength} → ${r.returnedStateLength}`,[r.requestAction,r.automatic?.action,r.outcome,r.error].filter(Boolean).map(v=>names[v]||v).join(' / ')]);return tr;}));if(d.persistError)note('状态持久化失败，请检查服务器磁盘和权限。');}finally{loading=false;}}
+$('toggle').onclick=async()=>{if(switchBusy)return;switchBusy=true;$('toggle').disabled=true;try{const next=!enabled;await api('/api/automation',{enabled:next});enabled=next;note(next?'已启动：自动探测和固定；探测可能计费。':'已关闭：已取消探测，等待中的原请求原样放行。');}catch(e){note(e.message);}finally{switchBusy=false;await refresh().catch(e=>note(e.message));}};
+$('login-form').onsubmit=async e=>{e.preventDefault();try{const f=e.target.elements;const d=await api('/api/login',{username:f.username.value,password:f.password.value});f.password.value='';csrf=d.csrf;note('');await refresh();}catch(err){note(err.message);}};
+$('logout').onclick=async()=>{try{await api('/api/logout',{});}finally{showLogin();}};
+$('new-rule').onclick=()=>edit();$('cancel-rule').onclick=()=>$('rule-form').hidden=true;
+$('rule-form').onsubmit=async e=>{e.preventDefault();try{const f=e.target.elements,m=f.model.value.trim(),list=s=>s.split(/[,，\s]+/).filter(Boolean).map(Number),latest=await api('/api/states');const r={...(latest.rules[m]||{ttlSeconds:300,scope:'session',unknownPolicy:'pass',autoLearn:false}),enabled:true,pinLengths:list(f.pinLengths.value),discardLengths:list(f.discardLengths.value)};await api('/api/rules',{rules:{...latest.rules,[m]:r},acknowledgeExperimental:true});e.target.hidden=true;note('模型规则已保存；启动/关闭状态未改变。');await refresh();}catch(err){note(err.message);}};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)forget();});setInterval(()=>{if(authenticated&&!document.hidden)refresh().catch(e=>note(e.message));},3000);setInterval(clocks,1000);refresh().catch(()=>{});

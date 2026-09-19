@@ -1,228 +1,110 @@
-# Sub2API Turn-State
+# Sub2API Turn-State · v0.5.0
 
-可选的 Linux 入口扩展：按模型观察 / 配置 `x-codex-turn-state`，提供登录控制台、固定候选值、刷新倒计时、手动刷新及可回滚的 Nginx 接管。
+单开关的可选入口扩展。登录控制台后只有一个运行开关：**启动 / 关闭**。
 
 ```text
 客户端 → Nginx → 本扩展 127.0.0.1:17890 → Sub2API 127.0.0.1:18080
-                                             ↓
-                               Sub2API 原有账号代理 → 上游
+                                                     ↓
+                                     Sub2API 原有账号 / 出站代理 → 上游
 ```
 
-**不替换 Sub2API 的账号代理，不修改 Docker 网络，也不读取系统代理变量。** 同时处理 `/responses` 和 `/v1/responses` 路径族（包括 `/compact`）；不改写这两类请求原有的上游路径。其他流量保持原入口路由。完全撤销接管后，Nginx 恢复直接访问 Sub2API。
+不会修改 Sub2API 账号、Docker 网络或出站代理配置。本机转发不使用 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY。
+
+## 开关的含义
+
+**启动**：收到已配置目标模型的完整 HTTP Responses 请求后，检查对应绑定是否已有未过期、模型声明经过核对且长度符合规则的固定值。有则直接使用；没有则保留原请求在有界内存中，只发送简短探测。模型/长度未命中会自动退避重试；命中后固定并发送原请求一次。到期后，下一条目标请求自动重取。
+
+**关闭**：取消正在进行的探测；仍连接的等待原请求原样放行。新请求直接透传，不解析正文中的模型、不修改请求或响应状态头。控制台和转发服务仍运行。已经在上游执行的请求无法撤回。
+
+自动模式没有共享额度、总尝试次数或总运行时长设置，也没有隐藏的旧额度检查。旧 `probe-budget.json`、`probe-limits.json`、`preflight.json` 不再读取；不会出现旧额度耗尽造成自动停止。
+
+有流量才进行探测；没有请求时不空刷。无需保存 API Key、手动选会话或额外启动一个探测任务。当前请求提供认证与会话标识，完成或取消后释放这些引用。探测使用 `input: "ping"` / `instructions: "Reply only OK."` / `max_output_tokens: 16`，不会携带原始提示词、工具或附件；上游可能忽略输出限制，探测可能持续计费。
+
+模型未命中（例如 astra 请求返回 luna）或长度未命中均继续，不将错误模型的 292 固定给 astra。只有 HTTP 2xx、精确模型声明、配置长度，以及成功结束或输出 token 上限事件均通过检查时才采用。上述条件是本地兼容判断，不是状态签名验证或底层模型身份的证明。
+
+### 基础网络保护仍然存在
+
+重试间隔自动从 2 秒退避到最多 30 秒；不存在总次数或总时限停止条件。单条网络探测仍使用 15 秒超时，防止挂死的 socket。401/403/429、连接错误、响应失败和服务器错误会让当前原请求得到明确的 503（不发送原始正文），短暂冷却后后续请求可以再试，不做认证/限流绕过。
+
+客户端断开时取消其等待；最后一个同绑定等待者断开后取消探测。客户端、Nginx 或 CDN 本身仍可能有等待超时，这不是本工具的“总探测时间”设置。没有目标响应时，不能保证原请求一定能继续。
+
+最多两个不同绑定同时探测；同绑定并发会合并。最多八个等待原请求，合计保留正文不超过 64 MiB，超载明确报错。资源保护不是次数配额。原始生成不会因失败而被扩展自行重放。
+
+## 控制台
+
+需要管理员登录；保留原账号密码。页面提供总开关、自动进度、当前固定值及刷新倒计时、请求与状态日志。完整状态仅在管理员点击后通过受保护 POST 获取，显示后自动清除；普通日志不记录完整状态。
+
+多模型格式保留在折叠的“模型规则”中：astra 的 292/312 为用户提供的兼容规则，不是所有模型通用规则。已有模型长度、刷新周期、隔离范围原样保留。添加其他模型时可指定目标长度，未配置模型不自动套用 astra。普通使用不需要编辑这些规则。
+
+固定值按 API Key 的 HMAC、模型和配置的会话/轮次隔离。前置扩展无法感知 Sub2API 内部切换上游账号；宽范围 credential 隔离及跨轮复用属于实验性兼容行为。相同 token 的重复响应不会无限延长本地刷新倒计时。
 
 ## 安装
 
-需要 Linux、systemd、Nginx 和系统可读的 Node.js 22+。零第三方运行依赖。系统 Node 版本较旧时，可以将官方 Node 22 放在 `/opt` 并使用独立 npm prefix，不必升级或替换其他应用的 Node。
+需要 Linux、systemd、Nginx 和 Node.js 22+。零第三方运行依赖。旧服务器可独立安装 Node 到 `/opt`，不用替换其他应用的运行时。
 
-GitHub Release 提供标准 npm tarball；这是 **GitHub 发布资产，不代表已经发布 npm registry**：
+标准 npm tarball 发布于 GitHub Release，并不表示已发布到 npm registry：
 
-```bash
-# 建议使用私有 prefix，避免与系统已有 CLI 冲突。
+```sh
 npm install -g --prefix /opt/sub2api-turnstate/npm --ignore-scripts \
-  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.4.1/babadaren-sub2api-turnstate-0.4.1.tgz
+  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.5.0/babadaren-sub2api-turnstate-0.5.0.tgz
 
-# 使用 Node 22+ 运行安装入口。安装会创建 systemd 服务、自动启动并设置开机启动。
-# --nginx-conf 指向你现有的 Sub2API 反向代理配置。
 sudo node /opt/sub2api-turnstate/npm/lib/node_modules/@babadaren/sub2api-turnstate/bin/turnstate.mjs install \
-  --admin-origin https://state.example.com \
-  --domain state.example.com \
+  --admin-origin https://state.example.com --domain state.example.com \
   --nginx-conf /etc/nginx/conf.d/sub2api.conf --apply
+
+# 使用安装时的 Node 绝对路径，不依赖系统默认 Node
+sudo turnstate start
 ```
 
-安装完成后 `/usr/local/bin/turnstate` 会使用安装时的 Node 绝对路径，不依赖交互式 shell 中的 Node 版本。
+新安装初始关闭；`start` 开启自动处理和可能计费的探测。旧安装处于 `pin` 状态时升级为自动开启，旧 `off/observe` 状态保持关闭。升级需先安全撤销入口，等待现有请求结束，再切换独立版本目录；保留旧版本、Nginx 备份、状态和模型规则。`install` 不会静默覆盖现有 systemd 服务。
 
-安装默认是 **observe**：自动接管入口并采集已配置模型的候选值，不改写状态头。确认模型、账号粘性和风险后，在控制台选择“启用模型固定 / 回灌”，或：
+默认用户名 `admin`。随机初始密码保存在服务器 root 专用文件，不输出到日志：
 
-```bash
-sudo turnstate mode pin --ack-experimental
-```
-
-npm 安装本身没有 postinstall 副作用，不会静默修改生产 Nginx。系统安装需要显式 `install --apply`。
-
-### 管理账号与域名
-
-默认用户名：`admin`。随机初始密码写入 root 专用文件，而不是发布日志：
-
-```bash
+```sh
 sudo cat /etc/sub2api-turnstate/initial-admin-password
 ```
 
-请将密码保存到密码管理器，并删除此初始密码文件（不影响密码哈希）。重置密码：
+DNS 未就绪时只提供验证占位页；DNS 与证书就绪后开启控制台 HTTPS：
 
-```bash
-read -rs -p 'New password: ' PW; echo
-printf '%s' "$PW" | sudo turnstate password --password-stdin
-unset PW
-sudo systemctl restart sub2api-turnstate
-```
-
-DNS 尚未就绪时，安装只生成 HTTP-01 验证入口和返回 503 的占位页，不开放明文登录。添加 DNS 后执行：
-
-```bash
+```sh
 sudo turnstate domain-enable --domain state.example.com --apply
 ```
 
-该命令通过系统 `certbot` 的 webroot 模式申请独立证书，验证证书域名，配置 HTTPS 控制台并 reload Nginx。需要服务器可被公网的 80/443 端口访问、已有可用 Certbot 账户或预先设置好账户。它不操作 DNS 服务商，不关闭防火墙，也不替换其他站点证书。成功后安装证书续签的 Nginx reload hook。
+## 常用命令
 
-## 多模型规则
-
-模型来自 HTTP JSON 正文中的 `model`，而不是从不透明的 state 字符串“猜”出来。模型为空、无法识别、编码正文或正文超过 8 MiB 时，不套用默认模型；请求字节仍原样转发。超过检查上限的请求以有界缓冲 + 流式转发处理。
-
-控制台可新增任意模型，包括 `gpt-5.6-sol` 等自定义上游名称。预置规则如下；这些名称是否由上游提供，须由你的服务确定：
-
-| 模型 | 固定长度 | 丢弃长度 | 周期 | 初始状态 |
-|---|---|---|---|---|
-| `gpt-6-astra` | 292 | 312 | 300 秒 | 规则启用，但全局仍为 observe |
-| `gpt-5.6-sol` | 未配置 | 无 | 300 秒 | 规则关闭，等待观察后配置 |
-| 其他模型 | 不猜测 | 不猜测 | 可配置 | 未配置时只观察 |
-
-292/312 是用户提供的特定兼容规则，**不是公开协议的通用有效性判断**。同模型可以设置多个固定长度和丢弃长度。未知长度默认透传。可选“自动学习”只表示接受未被排除的成功响应长度作为候选，不证明其真正可用。
-
-示例规则对象（其他模型的具体长度请根据实际记录填写，不要照抄测试数据）：
-
-```json
-{
-  "gpt-6-astra": {
-    "enabled": true,
-    "pinLengths": [292],
-    "discardLengths": [312],
-    "ttlSeconds": 300,
-    "scope": "session",
-    "unknownPolicy": "pass",
-    "autoLearn": false
-  }
-}
-```
-
-```bash
-sudo turnstate rules --file ./rules.json --ack-experimental
-sudo turnstate states
-```
-
-上传完整规则对象会替换当前规则集合；页面编辑单个模型会保留其他模型规则。
-
-### 固定、隔离和刷新
-
-候选仅从 **2xx 成功响应**获取，不从客户端请求重新采纳旧值。默认按 API Key 的 HMAC、模型和会话隔离；可改为显式轮次范围，或更宽的 API Key 范围。没有必要标识时绕过回灌。不会跨 API Key 或模型共用一个固定值。
-
-- `turn`：API Key + 模型 + 会话 + 显式 `x-codex-turn-id` / `metadata.turn_id`。缺少轮次不固定。
-- `session`：API Key + 模型 + 会话；属于跨轮兼容实验，不能保证符合上游路由生命周期。
-- `credential`：API Key + 模型；范围更宽，不建议用于多账号池。
-
-**前置代理不知道 Sub2API 内部实际选择的账号。** API Key 隔离不能替代上游账号隔离；账号池切换、认证变化、跨轮复用可能导致错误。生产环境先 observe；仅在已验证的单账号或粘性会话链路上主动启用 pin。真正的账号感知集成点见 `deploy/INTEGRATION.md`，本版本未修改 Sub2API 源码。
-
-控制台显示模型、固定长度、脱敏预览、指纹、来源、采集时间、隔离标识及倒计时。管理员点“查看完整值”后才调用受保护的 POST 接口获取完整 state；不会进入普通转发日志。完整值的 UI 显示会自动清除。
-
-**倒计时是本工具本地配置的刷新周期，不是解密出的上游有效期。** 重复收到同一个值不会无期限延长倒计时。到期 / 手动刷新会使旧绑定失效；固定模式下下一条同绑定请求不带旧 state，等待新的成功响应采集。没有真实流量时明确显示“等待新响应”，不会伪造“刷新成功”。刷新前已在途的响应不会恢复旧绑定。
-
-```bash
-sudo turnstate refresh --model gpt-6-astra
-```
-
-支持管理员对已有隔离绑定手动粘贴符合该模型长度的 state。当前版本 **不持久化探测 API Key，不后台定期探测，不遍历代理节点**。普通刷新不会主动请求或切换出口；v0.3.0 增加了单独确认、次数受限的主动探测，见下节。
-
-## 主动探测（v0.4.1 更新）
-
-控制台新增“主动探测”。它直接连接配置中的本机 Sub2API，不经过自己的状态回灌链路，**不带旧 state，不改变指定 model**，继续由 Sub2API 选择账号并使用原来的出站代理。
-
-先给目标模型配置并启用明确的固定长度，例如用户提供的 `gpt-6-astra → 292`。探测目标只能是该模型已配置的固定长度；不会把 292 当作所有模型的通用规则。
-
-两种启动方式：
-
-- **选定会话的下一条成功请求**：先用目标模型发一条正常请求，再在控制台选择对应的脱敏客户/会话，点击开始。下一条同绑定的正常请求成功结束后，仅本次借用其认证、会话和路由标识启动探测。不会保留聊天正文，也不会借用其他模型或其他 API Key 的请求。等待超过 120 秒即取消。
-- **手动输入**：输入 Sub2API API Key，以及与真实客户端相同的 session/turn 标识。密钥仅在本次任务内存中保存，结束/取消后移除引用，不进入记录或配置文件。标识不同就不是同一个固定绑定。
-
-默认 3 次，**取消最多 10 次的硬限制**：`maxAttempts` 接受正的安全整数（例如 20、50、100、1000），包含第一次，0 不表示无限循环。串行、间隔至少 2 秒；单次请求最多 15 秒。手动任务 `maxRunSeconds` 默认 180 秒，可设 5–3600 秒；自动前置 `maxWaitSeconds` 默认 45 秒，可设 5–3600 秒。次数、总时限、剩余小时额度任一先到都会停止，因此不是保证一定执行指定次数。等待同绑定真实请求的时间仍为 120 秒。
-
-手动与前置探测共享滚动一小时额度，默认 30 次，可在控制台“探测共享额度”设为 1–100000。配额在 `probe-limits.json`，用量在 `probe-budget.json`；提高额度或重启**不会清零用量**。每进程每 10 分钟最多启动 3 个手动任务，不限制任务只能尝试 3 次。每次发送固定小提示及 `max_output_tokens: 16`，不自动移除该限制。上游实际计费以其账单为准。
-
-只有 2xx、目标长度、响应声明模型完全一致，而且响应正常结束（或明确因输出 token 上限结束）才采纳。**HTTP 成功但模型不符 `model_mismatch` 或长度不符 `length_miss` 均会在限制内继续尝试**；例如 luna/312 不再导致第一轮结束。luna/292 也绝不会作为 astra/292 固定。401/403/429、重定向、5xx、响应失败、模型缺失和不确定超时仍停止。命中后来源显示 `probe` 并停止；只保存到当前绑定。观察模式只保存候选，不回灌。UI 区分单次未命中与任务结束，显示模型不符次数、下一次尝试时间、剩余额度及最近 100 次明细。
-
-同一出口可能始终返回 312。次数用完会显示“未命中”，不会制造/截断 292，也不会自动切节点、更换账号或无限请求。状态长度只是一种实验性选择规则，不是有效性验证；探测也不能解决 Sub2API 内部账号切换的隔离问题。已有正常生成可能因同会话路由实验受到影响，应先用于已验证的单账号/粘性链路。
-
-```bash
-sudo turnstate probe-status
-sudo turnstate probe-budget
-# 需要更大测试批次时，显式提高共享小时额度；不会清空已用次数或直接调用上游
-sudo turnstate probe-budget --per-hour 100 --ack-billable --ack-experimental
-# 从状态输出选择已有 binding id（不含明文密钥）
-sudo turnstate probe-start --model gpt-6-astra --binding BINDING_ID --attempts 50 --max-run-seconds 600 --ack-billable --ack-experimental
-sudo turnstate probe-stop
-```
-
-关闭处理、改规则、手动刷新/替换、停止服务都会取消未完成探测；不会在服务启动、重启或倒计时结束后自动恢复/重复探测。
-
-转发记录新增“请求 → 响应声明模型”。请求模型是进入扩展时 JSON 中的值，扩展原样转发该正文。响应模型来自有界、只读的 SSE/JSON 元数据检查，缺失时显示未识别，不能用来证明底层运行模型的身份。不会为识别模型缓冲整个响应。
-
-## 控制命令
-
-```bash
-sudo turnstate status
+```sh
+sudo turnstate start        # 自动探测 + 固定
+sudo turnstate stop         # 取消探测 + 原样透传
+sudo turnstate status       # 状态、版本、已完成请求
+sudo turnstate auto-status  # 自动任务及缓存命中
+sudo turnstate states      # 模型规则和脱敏固定值
+sudo turnstate refresh --model gpt-6-astra  # 失效，下一条请求自动重取
 sudo turnstate doctor
-sudo turnstate start          # 观察模式；不自动重新接管已撤销的 Nginx
-sudo turnstate stop           # 原样透传，控制台保持运行
-sudo turnstate mode pin --ack-experimental
-sudo turnstate disconnect --apply  # 恢复原 Nginx；服务仍运行
+
+sudo turnstate disconnect --apply     # 撤销 Nginx 接管；控制台仍运行
 sudo turnstate connect --nginx-conf /etc/nginx/conf.d/sub2api.conf --apply
-sudo turnstate service-stop --apply  # 先恢复 Nginx，再停止守护进程
-sudo turnstate uninstall --apply     # 先恢复路由，再移除 systemd 单元
+sudo turnstate service-stop --apply   # 先恢复原路由，再停止进程
+sudo turnstate uninstall --apply      # 先恢复路由，再移除 systemd；数据/备份保留
 ```
 
-卸载保留数据、初始密码文件（如尚未删除）、备份、CLI wrapper 和版本目录，不递归删除运维文件；保留的 CLI 可用于检查，依赖运行服务的命令不再可用。需要的话再移除专用 npm 包、控制台站点和 wrapper：
+请勿直接 npm uninstall 后留下指向已移除服务的 Nginx 配置。完整停用后再卸载 npm 包、停用控制台站点。
 
-```bash
-npm uninstall -g --prefix /opt/sub2api-turnstate/npm @babadaren/sub2api-turnstate
-# 先确认需要停用控制台，再删除 /etc/nginx/conf.d/turnstate-console.conf，nginx -t 后 reload。
-```
+旧版 `probe-start/probe-budget/preflight-config` 等独立控制命令已移除；旧管理 API 返回 410，提示使用单一 `/api/automation`，而不是静默维持旧额度。`GET /api/automation` 查询；`POST /api/automation` 接受 `{"enabled":true}` 或 `{"enabled":false}`。管理 API 都需要鉴权，浏览器写操作另需 Origin、JSON Content-Type 和 CSRF 校验。
 
-不要先 `npm uninstall` 后再考虑路由。`install` 拒绝静默覆盖现有 systemd 单元；升级需先安全撤销 / 停止，再安装新版本，保留配置与状态。
+## 覆盖范围及数据
 
-## 可用性与数据安全
+同时支持 `/responses`、`/v1/responses` 及 `/compact` 的完整 HTTP POST。非目标模型、无法解析、压缩、超出 8 MiB 默认解析上限的正文、WebSocket 握手按原流程透传，不猜测其模型。SSE 响应流不缓冲整份输出；响应诊断读取上限默认 4 MiB。解析并发受限，繁忙请求按原流程透传。
 
-- Nginx 配置备份在 `/etc/sub2api-turnstate/nginx.json`；修改前后执行 `nginx -t`。验证失败自动恢复；检测到人工修改时拒绝覆盖。
-- Nginx 为扩展设置原 Sub2API 的备用入口。连接被拒绝可回退，但已提交的 POST、不确定的超时、已开始的 SSE/WS **不重放**；不能承诺所有故障零中断。
-- HTTP 响应流 / SSE 不缓冲。WebSocket 字节原样转发，只记录握手；不会默认把未知模型握手当作 astra。此版本不能根据后续 WebSocket 帧重写已经发出的握手头。
-- 密码 scrypt 哈希、HttpOnly/SameSite/Secure 会话、Origin + CSRF 校验、登录限速。服务运行在独立低权限账号下，管理与转发只监听 loopback。
-- runtime/config/rules/state 存于 `/var/lib/sub2api-turnstate`，完整 state 文件权限 0600。状态文件不是加密存储，应当像凭据一样保护，不入 Git。
-- 记录不包含 Authorization、Cookie、查询串、提示词、回答或完整 state。日志轮转有上限；可查看最近记录，不提供 token 计费统计。
-- 计数及长度分布从本次进程启动开始。HTTP 时间是首响应头耗时，不是首 token。WS 计数是握手次数，不是消息轮数。
+仅监听 loopback。Nginx 的连接失败备用路径保留；扩展不可连接时可回原 sub2api，因此不是所有故障下的强制拦截层。运行中自动流程主动返回的 503 不会被 Nginx 转送备用上游。没有 TLS 中间人、代理切换或系统流量劫持。
 
-## 开发与发布
+配置/状态在 `/var/lib/sub2api-turnstate`，Nginx 回滚记录在 `/etc/sub2api-turnstate`；完整状态文件权限 0600，不加密、不入 Git。日志轮转有上限，排除 Authorization、Cookie、查询参数、正文与完整状态。关闭时仍可记录基础传输状态。内存统计和最近自动任务随进程重启归零；轮转日志保留。
 
-```bash
+## 开发
+
+```sh
 npm run check
 npm test
 npm pack --ignore-scripts
 ```
 
-测试覆盖多模型不同长度、凭据 / 会话隔离、计时过期、手动刷新、在途响应隔离、持久化、管理员鉴权、SSE、WebSocket、原样透传与真实 Nginx 回滚 / fallback。
-
-仓库提供 GitHub Actions CI 和 Release 打包工作流。默认仅发布 GitHub Release；npm registry 发布需要仓库所有者另行设置发布身份 / OIDC，不包含任何发布 token。
-
-
-## v0.3.1: model inspection diagnostics
-
-Long requests are not model switches. The old 1 MiB JSON inspection ceiling could leave a valid model blank. The default request inspection ceiling is now 8 MiB; normal forwarding response diagnostics inspect up to 4 MiB rather than 64 KiB. Four concurrent request readers and four response readers bound memory. Oversized, encoded or busy requests still forward unchanged without guessing a model. Active probes retain their existing independent byte/request budgets.
-
-Optional fields in the private `config.json` are `requestMetadataMaxBytes` (default 8388608), `responseMetadataMaxBytes` (default 4194304), and `metadataConcurrency` (default 4). Each byte limit must be 65536..16777216; the combined configured byte budget multiplied by concurrency cannot exceed 128 MiB. Restart the service safely after editing. These limits bound inspected bytes, not exact process RSS; parsing and transport add overhead.
-
-New records contain `requestModelReason`, `responseModelReason`, response completion/failure flags and a validated upstream request ID where available. The console distinguishes body limits, response inspection limits, missing model fields, compressed bodies, concurrency bypass, and historical records lacking diagnostics. It never replaces a missing response model with the request model. Old log records are not retroactively rewritten.
-
-The 292/312 presets remain an opt-in heuristic, not a protocol validity test. HTTP 200 alone also does not guarantee a successful SSE completion. Compare `responseCompleted`, `responseFailed`, application errors and real same-turn continuation behaviour. The repair does not change your model policies, start probes, replace outbound proxies or obtain a 292 value automatically.
-
-
-## v0.4.0：请求前自动探测
-
-新增独立、默认关闭的前置开关。完整 HTTP 请求到达后，先查对应绑定有没有未过期、长度匹配且响应模型已核对的固定值；有则立即使用，没有则暂存原请求，仅发送短探测。命中后原请求发送一次。最大次数（含第一次）、总等待时间和失败策略可配置。上限耗尽可选择返回 503、不发原请求，或明确原样放行。
-
-v0.4.1 起，模型不符与长度未命中都会在次数和时间范围内继续；401/403/429、超时等仍停止。相同绑定并发只探测一次；失败冷却和可配置的跨手动/自动共享小时预算限制费用。不会改变 Sub2API 出站代理，不把其他模型或 API Key 的 state 混用。前置检查不能证明上游真正执行的底层模型。
-
-较多次试验建议使用独立手动探测。前置等待增加至数分钟，并不能延长客户端、Nginx 或 CDN 的超时；客户端断开后会取消原请求的等待，最后一个等待者离开时取消相关探测。仅修改应用等待参数，不自动改动其他网络层的配置。
-
-控制台新增“请求前自动探测”设置及进度。安装/升级不自动启用此收费功能；全局也须处于 pin 模式。详见 [配置、时序、命令与限制](deploy/PREFLIGHT.md)。
-
-```bash
-sudo turnstate preflight-status
-sudo turnstate preflight-config --file ./preflight.json --ack-billable --ack-experimental
-sudo turnstate preflight-disable
-```
+v0.5.0 替换旧的手动任务/额度测试为单开关自动流程测试，保留传输、SSE/WS、鉴权、模型解析、持久化及真实 Nginx 回滚/备用路由测试。详见 `TEST_AUTOMATIC.md`。历史行为和旧报告只适用于各自版本；本版本不再运行旧额度任务引擎。
