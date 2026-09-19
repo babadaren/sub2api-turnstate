@@ -1,6 +1,6 @@
 'use strict';
 let probeSnapshot = null, probeLoading = false;
-const probeNames = {waiting_request:'等待选定会话的下一条成功请求',running:'正在主动探测',found:'命中目标，已保存到此绑定',exhausted:'达到次数上限，未命中',stopped:'已停止',processing_disabled:'处理已关闭，探测停止',waiting_expired:'等待请求超时',deadline:'总时限已到',model_mismatch:'响应模型不符，已停止',response_model_missing:'响应未声明模型，未固定',length_miss:'长度未命中',pinned_for_binding:'已固定到选定绑定',target_candidate:'目标候选',configuration_changed:'规则改变，已停止',binding_refreshed:'绑定已刷新，探测停止',budget_exhausted:'探测预算已用完',timeout:'探测超时，未重试',response_failed:'响应失败，未固定',incomplete_response:'响应不完整，未固定',connection_error:'连接失败，未重试'};
+const probeNames = {waiting_request:'等待选定会话的下一条成功请求',running:'正在主动探测',found:'命中目标，已保存到此绑定',exhausted:'达到次数上限，未命中',stopped:'已停止',processing_disabled:'处理已关闭，探测停止',waiting_expired:'等待请求超时',deadline:'总时限已到',model_mismatch:'响应模型不符（本次未命中，可重试）',response_model_missing:'响应未声明模型，未固定',length_miss:'长度未命中（可重试）',pinned_for_binding:'已固定到选定绑定',target_candidate:'目标候选',configuration_changed:'规则改变，已停止',binding_refreshed:'绑定已刷新，探测停止',budget_exhausted:'共享小时额度耗尽，已停止',timeout:'探测超时，未重试',response_failed:'响应失败，未固定',incomplete_response:'响应不完整，未固定',connection_error:'连接失败，未重试'};
 function showProbeSource() {
   const manual = $('probe-form').elements.source.value === 'manual';
   $('probe-manual').hidden = !manual; $('probe-binding-field').hidden = manual;
@@ -9,6 +9,11 @@ async function refreshProbe() {
   if (!authenticated || probeLoading) return; probeLoading = true;
   try {
     probeSnapshot = await api('/api/probes');
+    const budget=probeSnapshot.budget, budgetForm=$('probe-budget-form');
+    if(budget){
+      $('probe-budget-status').textContent=`共享滚动一小时额度 ${budget.used}/${budget.maxAttemptsPerHour}，还可尝试 ${budget.remaining} 次${budget.unavailable?'；额度文件异常，暂停新探测':''}。更改额度不清空历史用量。`;
+      if(!budgetForm.dataset.loaded){budgetForm.elements.maxAttemptsPerHour.value=budget.maxAttemptsPerHour;budgetForm.dataset.loaded='1';}
+    }
     const f = $('probe-form').elements, selected = f.bindingId.value;
     const bindings = probeSnapshot.bindings.filter(b => b.model === f.model.value.trim());
     f.bindingId.replaceChildren(...bindings.map(b => {const o = text('option', `${b.model} · 客户 ${b.client} · 会话 ${b.session || '无'} · ${b.scope}`); o.value = b.id; return o;}));
@@ -18,7 +23,8 @@ async function refreshProbe() {
     const busy = !!job && ['waiting_request','running'].includes(job.status);
     $('probe-start').disabled = busy; $('probe-stop').disabled = !busy;
     if (!job) {$('probe-status').textContent='尚未主动探测。不会在启动服务或倒计时到期时自动产生费用。'; $('probe-results').replaceChildren(); return;}
-    $('probe-status').textContent = `${probeNames[job.status] || job.status} · 请求 ${job.model} · 目标长度 ${job.targetLengths.join(',')} · 已尝试 ${job.tried}/${job.maxAttempts} · 命中 ${job.hits} · ${time(job.createdAt)}`;
+    const next=busy&&job.nextAttemptAt ? ` · 下次约 ${Math.max(0,Math.ceil((job.nextAttemptAt-Date.now())/1000))} 秒` : '';
+    $('probe-status').textContent = `${probeNames[job.status] || job.status} · 请求 ${job.model} · 目标长度 ${job.targetLengths.join(',')} · 已尝试 ${job.tried}/${job.maxAttempts} · 模型不符 ${job.mismatchCount||0} 次 · 命中 ${job.hits} · ${busy?'剩余 '+Math.max(0,Math.ceil((job.deadline-Date.now())/1000))+' 秒':'已结束'}${next} · 仅显示最近 100 次 · ${time(job.createdAt)}`;
     $('probe-results').replaceChildren(...job.results.map(r => {const tr=document.createElement('tr');cells(tr,[r.attempt,time(r.time),job.model,r.responseModel || '未取得',r.status,r.length,probeNames[r.outcome]||r.outcome]);return tr;}));
   } catch(e) { if(authenticated) $('probe-status').textContent=e.message; }
   finally { probeLoading=false; }
@@ -35,7 +41,7 @@ $('probe-form').onsubmit=async event=>{
   if(!confirm('主动探测会使用所选凭据向原 sub2api 发起真实模型请求，可能计费并影响同会话路由。只在已验证的单账号/粘性链路使用。同一出口不保证返回目标长度。确认开始这一次有限探测？'))return;
   try {
     const body={model:f.model.value.trim(),source:f.source.value,endpoint:f.endpoint.value,
-      targetLengths:f.targetLengths.value.split(/[,，\s]+/).filter(Boolean).map(Number),maxAttempts:Number(f.maxAttempts.value),intervalSeconds:2,
+      targetLengths:f.targetLengths.value.split(/[,，\s]+/).filter(Boolean).map(Number),maxAttempts:Number(f.maxAttempts.value),maxRunSeconds:Number(f.maxRunSeconds.value),intervalSeconds:2,
       acknowledgeBillable:true,acknowledgeExperimental:true};
     if(body.source==='next_request')body.bindingId=f.bindingId.value;
     else {body.apiKey=f.apiKey.value.trim();body.sessionId=f.sessionId.value.trim();body.turnId=f.turnId.value.trim();}
@@ -44,5 +50,10 @@ $('probe-form').onsubmit=async event=>{
   }catch(e){notify(e.message);}
 };
 $('probe-stop').onclick=async()=>{try{await api('/api/probes/stop',{});notify('已停止探测；已发送的请求仍可能计费。');await refreshProbe();}catch(e){notify(e.message);}};
+$('probe-budget-form').onsubmit=async event=>{
+  event.preventDefault();const limit=Number(event.target.elements.maxAttemptsPerHour.value);
+  if(!confirm(`将手动和前置探测的共享滚动一小时额度设置为 ${limit} 次？更多尝试可能增加费用，保存不会立即启动任务，也不会清空已用额度。`))return;
+  try{await api('/api/probes/budget',{maxAttemptsPerHour:limit,acknowledgeBillable:true,acknowledgeExperimental:true});notify('共享小时额度已保存，历史用量保持不变。');await refreshProbe();}catch(e){notify(e.message);}
+};
 setInterval(()=>{if(authenticated&&!document.hidden)refreshProbe();},3000);
 showProbeSource();

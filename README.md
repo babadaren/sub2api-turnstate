@@ -19,7 +19,7 @@ GitHub Release 提供标准 npm tarball；这是 **GitHub 发布资产，不代�
 ```bash
 # 建议使用私有 prefix，避免与系统已有 CLI 冲突。
 npm install -g --prefix /opt/sub2api-turnstate/npm --ignore-scripts \
-  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.4.0/babadaren-sub2api-turnstate-0.4.0.tgz
+  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.4.1/babadaren-sub2api-turnstate-0.4.1.tgz
 
 # 使用 Node 22+ 运行安装入口。安装会创建 systemd 服务、自动启动并设置开机启动。
 # --nginx-conf 指向你现有的 Sub2API 反向代理配置。
@@ -121,7 +121,7 @@ sudo turnstate refresh --model gpt-6-astra
 
 支持管理员对已有隔离绑定手动粘贴符合该模型长度的 state。当前版本 **不持久化探测 API Key，不后台定期探测，不遍历代理节点**。普通刷新不会主动请求或切换出口；v0.3.0 增加了单独确认、次数受限的主动探测，见下节。
 
-## 主动探测（v0.3.0）
+## 主动探测（v0.4.1 更新）
 
 控制台新增“主动探测”。它直接连接配置中的本机 Sub2API，不经过自己的状态回灌链路，**不带旧 state，不改变指定 model**，继续由 Sub2API 选择账号并使用原来的出站代理。
 
@@ -132,16 +132,21 @@ sudo turnstate refresh --model gpt-6-astra
 - **选定会话的下一条成功请求**：先用目标模型发一条正常请求，再在控制台选择对应的脱敏客户/会话，点击开始。下一条同绑定的正常请求成功结束后，仅本次借用其认证、会话和路由标识启动探测。不会保留聊天正文，也不会借用其他模型或其他 API Key 的请求。等待超过 120 秒即取消。
 - **手动输入**：输入 Sub2API API Key，以及与真实客户端相同的 session/turn 标识。密钥仅在本次任务内存中保存，结束/取消后移除引用，不进入记录或配置文件。标识不同就不是同一个固定绑定。
 
-默认 3 次、硬上限 10 次、串行、间隔至少 2 秒；每次请求 15 秒超时、运行最多 180 秒。每进程限制每 10 分钟最多启动 3 次、每小时最多 30 次请求；重启会重置这些内存限额。每次发送固定小提示及 `max_output_tokens: 16`，上游不支持该参数时直接报告 HTTP 错误，不自动移除限制后重试。上游实际计费以其账单为准。
+默认 3 次，**取消最多 10 次的硬限制**：`maxAttempts` 接受正的安全整数（例如 20、50、100、1000），包含第一次，0 不表示无限循环。串行、间隔至少 2 秒；单次请求最多 15 秒。手动任务 `maxRunSeconds` 默认 180 秒，可设 5–3600 秒；自动前置 `maxWaitSeconds` 默认 45 秒，可设 5–3600 秒。次数、总时限、剩余小时额度任一先到都会停止，因此不是保证一定执行指定次数。等待同绑定真实请求的时间仍为 120 秒。
 
-只有 2xx、目标长度、响应声明的模型与请求模型完全相同，而且响应正常结束（或明确因输出 token 上限结束）才采纳；错误、模型不符、无法识别响应模型、重复状态头、401/403/429、重定向、5xx 或不确定超时都停止。仅在成功响应的长度未命中时进行下一次尝试。命中后来源显示 `probe` 并停止；仅保存到选定绑定。观察模式只保存候选，不回灌。
+手动与前置探测共享滚动一小时额度，默认 30 次，可在控制台“探测共享额度”设为 1–100000。配额在 `probe-limits.json`，用量在 `probe-budget.json`；提高额度或重启**不会清零用量**。每进程每 10 分钟最多启动 3 个手动任务，不限制任务只能尝试 3 次。每次发送固定小提示及 `max_output_tokens: 16`，不自动移除该限制。上游实际计费以其账单为准。
+
+只有 2xx、目标长度、响应声明模型完全一致，而且响应正常结束（或明确因输出 token 上限结束）才采纳。**HTTP 成功但模型不符 `model_mismatch` 或长度不符 `length_miss` 均会在限制内继续尝试**；例如 luna/312 不再导致第一轮结束。luna/292 也绝不会作为 astra/292 固定。401/403/429、重定向、5xx、响应失败、模型缺失和不确定超时仍停止。命中后来源显示 `probe` 并停止；只保存到当前绑定。观察模式只保存候选，不回灌。UI 区分单次未命中与任务结束，显示模型不符次数、下一次尝试时间、剩余额度及最近 100 次明细。
 
 同一出口可能始终返回 312。次数用完会显示“未命中”，不会制造/截断 292，也不会自动切节点、更换账号或无限请求。状态长度只是一种实验性选择规则，不是有效性验证；探测也不能解决 Sub2API 内部账号切换的隔离问题。已有正常生成可能因同会话路由实验受到影响，应先用于已验证的单账号/粘性链路。
 
 ```bash
 sudo turnstate probe-status
+sudo turnstate probe-budget
+# 需要更大测试批次时，显式提高共享小时额度；不会清空已用次数或直接调用上游
+sudo turnstate probe-budget --per-hour 100 --ack-billable --ack-experimental
 # 从状态输出选择已有 binding id（不含明文密钥）
-sudo turnstate probe-start --model gpt-6-astra --binding BINDING_ID --attempts 3 --ack-billable --ack-experimental
+sudo turnstate probe-start --model gpt-6-astra --binding BINDING_ID --attempts 50 --max-run-seconds 600 --ack-billable --ack-experimental
 sudo turnstate probe-stop
 ```
 
@@ -210,7 +215,9 @@ The 292/312 presets remain an opt-in heuristic, not a protocol validity test. HT
 
 新增独立、默认关闭的前置开关。完整 HTTP 请求到达后，先查对应绑定有没有未过期、长度匹配且响应模型已核对的固定值；有则立即使用，没有则暂存原请求，仅发送短探测。命中后原请求发送一次。最大次数（含第一次）、总等待时间和失败策略可配置。上限耗尽可选择返回 503、不发原请求，或明确原样放行。
 
-模型不符、401/403/429、超时等不无限重试。相同绑定并发只探测一次；失败冷却和跨手动/自动的每小时 30 次预算防止收费风暴。不会改变 Sub2API 出站代理，不把其他模型或 API Key 的 state 混用。前置检查不能证明上游真正执行的底层模型。
+v0.4.1 起，模型不符与长度未命中都会在次数和时间范围内继续；401/403/429、超时等仍停止。相同绑定并发只探测一次；失败冷却和可配置的跨手动/自动共享小时预算限制费用。不会改变 Sub2API 出站代理，不把其他模型或 API Key 的 state 混用。前置检查不能证明上游真正执行的底层模型。
+
+较多次试验建议使用独立手动探测。前置等待增加至数分钟，并不能延长客户端、Nginx 或 CDN 的超时；客户端断开后会取消原请求的等待，最后一个等待者离开时取消相关探测。仅修改应用等待参数，不自动改动其他网络层的配置。
 
 控制台新增“请求前自动探测”设置及进度。安装/升级不自动启用此收费功能；全局也须处于 pin 模式。详见 [配置、时序、命令与限制](deploy/PREFLIGHT.md)。
 

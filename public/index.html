@@ -12,31 +12,33 @@
 <p class="hint">可选功能，默认关闭。收到已配置模型的完整 HTTP 请求时，先检查对应绑定有无符合目标长度、响应模型已核对且未过期的状态。有则直接使用；没有则暂存原请求，只发简短探测，命中后发送原请求一次。长度和本地 TTL 不能证明上游真实有效性。</p>
 <form id="preflight-form"><div class="form-grid">
 <label>目标模型<input name="model" value="gpt-6-astra" maxlength="100" required></label>
-<label>最大尝试次数（含第一次）<input name="maxAttempts" type="number" min="1" max="10" value="3" required></label>
-<label>总等待上限（秒）<input name="maxWaitSeconds" type="number" min="5" max="60" value="45" required></label>
+<label>最大尝试次数（含第一次，不再限 10 次）<input name="maxAttempts" type="number" min="1" step="1" value="3" required></label>
+<label>总等待上限（秒，过长可能被客户端提前断开）<input name="maxWaitSeconds" type="number" min="5" max="3600" value="45" required></label>
 <label>尝试间隔（秒）<input name="intervalSeconds" type="number" min="2" max="10" value="2" required></label>
 <label>失败冷却（秒）<input name="cooldownSeconds" type="number" min="10" max="600" value="60" required></label>
 <label>探测失败后<select name="failurePolicy"><option value="reject">返回 503，原请求不发送</option><option value="passthrough">原样放行原请求（不保证有固定值）</option></select></label>
 </div><label class="check"><input name="enabled" type="checkbox">启用此模型的请求前探测</label>
 <div class="buttons"><button type="submit">保存前置探测设置</button><button id="preflight-disable" type="button" class="secondary">关闭全部前置探测</button></div></form>
-<p class="hint">目标长度取自上方模型规则，astra 通常配置 292。须同时开启“模型固定 / 回灌”模式。同绑定并发请求合并探测；失败冷却和共享每小时 30 次预算防止请求风暴。认证失败、429、响应模型不符、重定向、5xx 或超时不循环重试。请求模型未识别、超出解析上限或 WebSocket 握手不参与本机制，仍按原逻辑透传。原出站代理不改变。</p>
+<p class="hint">目标长度取自模型规则。HTTP 成功但响应模型不符或长度不符时会继续尝试，错误模型的 state 不会固定。次数、总等待、共享小时额度任一耗尽即停止；认证失败、429、重定向、5xx 或超时仍停止。共享额度在下方调整。同绑定并发合并探测。前置等待仍受客户端和 CDN 超时影响，较多次试验宜用独立手动探测。未知模型、超限正文和 WebSocket 仍按原逻辑透传；不改变出站代理。</p>
 <p id="preflight-summary"></p><div class="table-wrap"><table><thead><tr><th>开始时间</th><th>模型</th><th>已试 / 上限</th><th>结果</th><th>响应模型</th><th>长度</th><th>剩余等待</th></tr></thead><tbody id="preflight-records"></tbody></table></div></section>
 <section><h2>手动主动探测（可能计费）</h2>
-<p class="hint">只请求指定模型，不随 luna 等先行请求改变目标。默认最多 3 次，串行、间隔 2 秒，命中即停；认证失败、429、模型不符或超时立即停止。不会切换 172.18.0.1:1081 等出站代理。命中只适用于选定的 API Key / 模型 / 会话，不是全模型通用值。</p>
+<p class="hint">只请求指定模型。返回 luna 等非目标模型或长度不符时会继续串行探测，命中目标模型与长度后立即固定并停止。尝试次数可以填写 20、50、100 等正整数，不再限 10 次；总时限和共享小时额度也需要足够。401、403、429、5xx、响应失败或超时仍停止。不切换出站代理，不将非目标模型的 state 用于原会话。</p>
 <form id="probe-form"><div class="form-grid">
 <label>目标模型<input name="model" value="gpt-6-astra" maxlength="100" required></label>
 <label>目标长度（须先在模型规则中配置）<input name="targetLengths" value="292" required></label>
-<label>最多尝试<input name="maxAttempts" type="number" value="3" min="1" max="10" required></label>
+<label>最多尝试（含第一次，不再限 10 次）<input name="maxAttempts" type="number" value="3" min="1" step="1" required></label>
+<label>本次总运行时限（秒）<input name="maxRunSeconds" type="number" value="180" min="5" max="3600" required></label>
 <label>请求路径<select name="endpoint"><option value="/responses">/responses</option><option value="/v1/responses">/v1/responses</option></select></label>
 <label>凭据来源<select name="source"><option value="next_request">选定会话的下一条成功请求（仅本次借用）</option><option value="manual">手动输入 API Key 和同一会话标识</option></select></label>
 <label id="probe-binding-field">目标会话<select name="bindingId"><option value="">先发送一条目标模型请求</option></select></label></div>
 <div id="probe-manual" class="form-grid" hidden><label>Sub2API API Key<input name="apiKey" type="password" autocomplete="off" placeholder="只用于本次探测，不存盘"></label><label>与客户端相同的 Session ID<input name="sessionId" autocomplete="off"></label><label>显式 Turn ID（turn 范围必填）<input name="turnId" autocomplete="off"></label></div>
-<p class="hint">选择“下一条成功请求”后，再用选定模型和会话发送一条正常消息；本服务只借用该请求的凭据及路由标识，不复制提示词、聊天正文或旧 state。等待 120 秒后自动取消，运行最多 180 秒；每小时最多 30 次尝试。手动方式的会话标识不匹配时，命中也不会用于原会话。正常的到期刷新仍不自动发起付费探测。</p>
+<p class="hint">选择“下一条成功请求”后，在 120 秒内用同一模型及会话发送一条正常消息。本任务仅借用凭据与路由标识，不复制聊天正文。总运行时限默认 180 秒，可设至 3600 秒；共享小时额度默认 30 次，可在下方提高，已用额度不清零。任务在服务端执行，页面轮询进度；仅显示最近 100 次明细。手动输入的会话不一致时，命中不会用于原会话。正常到期刷新不会自行启动手动探测。</p>
 <div class="buttons"><button id="probe-start" type="submit">开始本次主动探测</button><button id="probe-stop" type="button" class="secondary" disabled>停止探测</button></div></form>
 <p id="probe-status" role="status">尚未主动探测</p><div class="table-wrap"><table><thead><tr><th>次数</th><th>时间</th><th>请求模型</th><th>响应声明模型</th><th>HTTP</th><th>state 长度</th><th>结果</th></tr></thead><tbody id="probe-results"></tbody></table></div></section>
+<section><h2>探测共享额度</h2><p id="probe-budget-status"></p><form id="probe-budget-form"><label>手动＋前置探测共享滚动一小时最多尝试（1–100000）<input name="maxAttemptsPerHour" type="number" min="1" max="100000" value="30" required></label><button type="submit">保存共享额度</button></form><p class="hint">例如本次想试 50 次，需保证剩余额度至少 50，并给予足够运行时间。提高额度可能增加费用，需要再次确认；修改不会清空已有用量，运行中请先停止任务。此处不限制单个任务只能 10 次。</p></section>
 <section><h2>当前固定值 / 候选值</h2><p class="hint">倒计时是本工具的本地刷新周期，不是上游签发的有效期。到期或手动刷新会使旧值失效，等待下一条匹配的成功响应取得新值；未开启请求前探测时不自动生成付费探测；启用后在下一条匹配请求到达时触发。观察模式下这里显示候选值，不会回灌。主动探测命中后来源显示 probe。</p><div id="pins" class="pin-grid"></div></section>
 <section><h2>实际状态头长度分布</h2><p class="hint">0 表示缺少状态头。请求、响应分别统计。模型无法从请求识别时不会默认归入 gpt-6-astra。记录会区分请求过大、压缩、并发限制和响应未读到声明；旧记录不会补猜模型。</p><div class="table-wrap"><table><thead><tr><th>模型</th><th>请求长度 : 次数</th><th>响应长度 : 次数</th><th>最近出现</th></tr></thead><tbody id="observed"></tbody></table></div></section>
 <section><div class="row"><h2>最近转发记录</h2><label>筛选<select id="filter"><option value="">全部事件</option><option value="request">请求</option><option value="state">状态更新</option><option value="probe">手动探测</option><option value="preflight">前置探测</option><option value="admin">管理操作</option></select></label></div><p class="hint">不记录 API Key、Cookie、提示词、回答或完整状态。完整固定值仅管理员点选后显示。WebSocket 只统计握手，无法从后续帧补改已经发出的握手头；未知模型握手不固定。超过配置的解析上限（默认 8 MiB） / 编码的请求正文原样转发，不参与模型固定。</p><div class="table-wrap"><table><thead><tr><th>时间</th><th>事件 / 请求</th><th>请求 → 响应声明模型</th><th>状态</th><th>请求 state</th><th>响应 state</th><th>首响应头</th><th>动作</th></tr></thead><tbody id="records"></tbody></table></div></section>
 <details><summary>边界与运行说明</summary><p id="notice" class="hint"></p><p>停止处理不停止守护进程。停止服务 / 卸载应使用 SSH 的 turnstate service-stop / uninstall，先撤销 Nginx 接管。刷新等待新响应，不代表会绕过账号或上游配额限制。</p></details>
-</div><p id="message" role="status"></p><footer>v0.4.0 · 数据只存本机 · 管理接口必须通过 HTTPS 或 SSH 隧道访问</footer>
+</div><p id="message" role="status"></p><footer>v0.4.1 · 数据只存本机 · 管理接口必须通过 HTTPS 或 SSH 隧道访问</footer>
 </main></body></html>

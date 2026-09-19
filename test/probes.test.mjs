@@ -53,7 +53,7 @@ test('serial probe misses 312 then pins 292 for exact model and credential/sessi
 test('model mismatch cannot seed astra even when response state length is 292',async t=>{
  let calls=0;const f=await fixture(t,async(req,res)=>{await read(req);calls++;success(res,292,'gpt-5.6-luna');});
  f.manager.start(input());await f.manager.pending;
- assert.equal(calls,1);assert.equal(f.manager.snapshot().job.status,'model_mismatch');assert.equal(f.states.snapshot().pins.length,0);
+ assert.equal(calls,3);assert.equal(f.manager.snapshot().job.status,'exhausted');assert.equal(f.manager.snapshot().job.mismatchCount,3);assert.equal(f.states.snapshot().pins.length,0);
 });
 
 test('missing response model and error events cannot create pins',async t=>{
@@ -81,7 +81,7 @@ test('next-request probe binds only the explicitly selected model/session, ignor
 
 test('probe confirmation, scope, length, concurrency and rate limits are enforced before requests',async t=>{
  const f=await fixture(t,async(req,res)=>{await read(req);success(res);});
- for(const args of [{acknowledgeBillable:false},{acknowledgeExperimental:false},{maxAttempts:11},{intervalSeconds:0},{sessionId:''},{model:'gpt-5.6-sol'},{targetLengths:[312]}])assert.throws(()=>f.manager.start(input(args)));
+ for(const args of [{acknowledgeBillable:false},{acknowledgeExperimental:false},{maxAttempts:0},{maxAttempts:1.5},{maxAttempts:Number.MAX_SAFE_INTEGER+1},{maxRunSeconds:3601},{intervalSeconds:0},{sessionId:''},{model:'gpt-5.6-sol'},{targetLengths:[312]}])assert.throws(()=>f.manager.start(input(args)));
  const ctx=f.states.context(model,{authorization:'Bearer unit-private-key',session_id:'unit-session'});f.manager.remember(ctx);
  f.manager.start(input({source:'next_request',bindingId:ctx.id}));assert.throws(()=>f.manager.start(input()));f.manager.stop();
  assert.throws(()=>f.manager.start(input()),/cooldown/);assert.equal(f.manager.snapshot().job.tried,0);
@@ -137,4 +137,54 @@ test('a successful response missing model identity is not pinned',async t=>{
 test('hourly request budget blocks starts without any outbound request',async t=>{
  let calls=0;const f=await fixture(t,async(req,res)=>{calls++;await read(req);success(res);});
  f.manager.attempts=Array(30).fill(Date.now());assert.throws(()=>f.manager.start(input()),/budget/);assert.equal(calls,0);
+});
+
+test('manual probe: eleven wrong-model successes then exact-model 292 pins on attempt twelve, not before',async t=>{
+ let calls=0;const f=await fixture(t,async(req,res)=>{
+   const body=await read(req);calls++;assert.equal(body.model,model);assert.equal(body.input,'ping');
+   assert.equal(req.headers['x-codex-turn-state'],undefined);
+   if(calls<=11){assert.equal(f.states.snapshot().pins.length,0);success(res,calls%2?312:292,'gpt-5.6-luna');}
+   else success(res,292,model);
+ });
+ f.manager.start(input({maxAttempts:50,maxRunSeconds:60}));await f.manager.pending;
+ const j=f.manager.snapshot().job;
+ assert.equal(calls,12);assert.equal(j.status,'found');assert.equal(j.tried,12);assert.equal(j.mismatchCount,11);assert.equal(j.hits,1);
+ assert.equal(j.results.filter(r=>r.outcome==='model_mismatch'&&r.retryable).length,11);
+ assert.equal(f.states.snapshot().pins.length,1);
+});
+
+test('retrying model mismatch remains cancellable during the interval',async t=>{
+ let calls=0;const f=await fixture(t,async(req,res)=>{await read(req);calls++;success(res,312,'gpt-5.6-luna');});
+ f.manager.start(input({maxAttempts:50,maxRunSeconds:60}));
+ for(let i=0;i<100&&!f.manager.snapshot().job.results.length;i++)await new Promise(r=>setTimeout(r,10));
+ assert.equal(f.manager.snapshot().job.status,'running');f.manager.stop();await f.manager.pending;
+ assert.equal(calls,1);assert.equal(f.manager.snapshot().job.status,'stopped');assert.equal(f.states.snapshot().pins.length,0);
+});
+
+test('shared hourly budget is adjustable above thirty and persists usage when raised or restarted',async t=>{
+ let calls=0;const f=await fixture(t,async(req,res)=>{calls++;await read(req);success(res);});
+ assert.throws(()=>f.manager.configureBudget({maxAttemptsPerHour:100},false));
+ assert.throws(()=>f.manager.configureBudget({maxAttemptsPerHour:0},true));
+ f.manager.attempts=Array(30).fill(Date.now());assert.equal(f.manager.consumeAttempt(),false);
+ const b=f.manager.configureBudget({maxAttemptsPerHour:100},true);assert.equal(b.used,30);assert.equal(b.remaining,70);
+ for(let i=0;i<5;i++)assert.equal(f.manager.consumeAttempt(),true);
+ const reopened=new ProbeManager(f.config,f.states,f.journal,()=> 'pin');t.after(()=>reopened.close());
+ assert.equal(reopened.budgetLimit,100);assert.equal(reopened.budgetStatus().used,35);
+ reopened.configureBudget({maxAttemptsPerHour:35},true);assert.equal(reopened.consumeAttempt(),false);
+ assert.equal(calls,0);
+});
+
+test('budget management API requires authentication, CSRF and billable acknowledgement',async t=>{
+ const f=await fixture(t,async(req,res)=>{await read(req);success(res);});
+ const app=await createExtension(f.config,f.home,{proxyPort:0,adminPort:0});
+ f.config.adminPort=app.admin.address().port;f.config.adminOrigin=`http://127.0.0.1:${f.config.adminPort}`;t.after(()=>app.close(100));
+ const u=f.config.adminOrigin;
+ assert.equal((await fetch(u+'/api/probes/budget')).status,401);
+ const login=await fetch(u+'/api/login',{method:'POST',headers:{origin:u,'content-type':'application/json'},body:JSON.stringify({username:'admin',password:'probe-test-password-123!'})});
+ const cookie=login.headers.get('set-cookie').split(';')[0],{csrf}=await login.json();const h={cookie,origin:u,'content-type':'application/json'};
+ const body={maxAttemptsPerHour:100,acknowledgeBillable:true,acknowledgeExperimental:true};
+ assert.equal((await fetch(u+'/api/probes/budget',{method:'POST',headers:h,body:JSON.stringify(body)})).status,403);
+ assert.equal((await fetch(u+'/api/probes/budget',{method:'POST',headers:{...h,'x-csrf-token':csrf},body:JSON.stringify({...body,acknowledgeBillable:false})})).status,400);
+ const r=await fetch(u+'/api/probes/budget',{method:'POST',headers:{...h,'x-csrf-token':csrf},body:JSON.stringify(body)});
+ assert.equal(r.status,200);assert.equal((await r.json()).remaining,100);
 });

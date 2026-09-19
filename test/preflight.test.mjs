@@ -44,7 +44,7 @@ test('exhaustion blocks original, maxAttempts includes the first attempt, cooldo
  assert.equal(f.app.journal.recent.filter(e=>e.kind==='request').at(-1).originalForwarded,false);
 });
 test('mismatched response model even with 292 never seeds cache or forwards the original',async t=>{
- const f=await fixture(t,(e,res)=>reply(res,292,'gpt-5.6-luna'));const r=await f.send();assert.equal(r.status,503);assert.equal((await r.json()).error.reason,'model_mismatch');assert.equal(f.seen.length,1);assert.equal(f.app.states.snapshot().pins.length,0);
+ const f=await fixture(t,(e,res)=>reply(res,292,'gpt-5.6-luna'),{maxAttempts:2});const r=await f.send();assert.equal(r.status,503);assert.equal((await r.json()).error.reason,'attempts_exhausted');assert.equal(f.seen.length,2);assert.equal(f.app.states.snapshot().pins.length,0);assert.equal(f.app.preflight.recent[0].mismatchCount,2);
 });
 test('simultaneous requests for the same binding share a single probe but each original is sent once',async t=>{
  let release,arrive;const hold=new Promise(r=>release=r),ready=new Promise(r=>arrive=r);
@@ -61,7 +61,7 @@ test('expired or manually entered unverified state must be probed, not treated a
  f.app.states.pins.get(ctx.id).expiresAt=0;r=await f.send();await r.text();assert.equal(f.seen.filter(e=>e.probe).length,2);
 });
 test('passthrough failure policy preserves original headers and response instead of applying pin filters',async t=>{
- const f=await fixture(t,(e,res)=>e.probe?reply(res,292,'gpt-5.6-luna'):reply(res,312),{failurePolicy:'passthrough'});
+ const f=await fixture(t,(e,res)=>e.probe?reply(res,292,'gpt-5.6-luna'):reply(res,312),{failurePolicy:'passthrough',maxAttempts:1});
  const r=await f.send({headers:{...headers,'x-codex-turn-state':'X'.repeat(312)}});assert.equal(r.status,200);assert.equal(r.headers.get('x-codex-turn-state').length,312);await r.text();
  assert.deepEqual(f.seen.map(e=>e.probe),[true,false]);assert.equal(f.seen[1].headers['x-codex-turn-state'],'X'.repeat(312));
 });
@@ -101,6 +101,18 @@ test('preflight config requires admin auth, CSRF and billable opt-in; disabled c
  body.rules[model].enabled=false;r=await fetch(base+'/api/preflight/config',{method:'POST',headers:{...h,'x-csrf-token':csrf},body:JSON.stringify(body)});assert.equal(r.status,200);await r.text();assert.equal(f.seen.length,0);
 });
 test('configuration bounds reject unlimited retry and unknown model keys',()=>{
- for(const bad of [{maxAttempts:0},{maxAttempts:11},{maxWaitSeconds:61},{intervalSeconds:0},{cooldownSeconds:0},{failurePolicy:'retry_forever'}])assert.throws(()=>validatePreflight({[model]:{...defaultPreflight(),...bad}}));
+ for(const bad of [{maxAttempts:0},{maxAttempts:1.5},{maxAttempts:Number.MAX_SAFE_INTEGER+1},{maxWaitSeconds:3601},{intervalSeconds:0},{cooldownSeconds:0},{failurePolicy:'retry_forever'}])assert.throws(()=>validatePreflight({[model]:{...defaultPreflight(),...bad}}));
+ for(const count of [11,50,100,1000])assert.equal(validatePreflight({[model]:{...defaultPreflight(),maxAttempts:count,maxWaitSeconds:600}})[model].maxAttempts,count);
  assert.throws(()=>validatePreflight(JSON.parse('{"__proto__":{"enabled":true}}')));
+});
+
+test('preflight: eleven model misses retry, attempt twelve hits 292, original sent only once afterwards',async t=>{
+ let attempts=0;const f=await fixture(t,(e,res)=>{
+   if(e.probe){attempts++;assert.equal(f.seen.some(x=>!x.probe),false);reply(res,attempts<=11?312:292,attempts<=11?'gpt-5.6-luna':model);}
+   else reply(res);
+ },{maxAttempts:50,maxWaitSeconds:60});
+ const r=await f.send();assert.equal(r.status,200);await r.text();
+ assert.equal(attempts,12);assert.equal(f.seen.length,13);assert.equal(f.seen.at(-1).raw,original);assert.equal(f.seen.at(-1).headers['x-codex-turn-state'],state);
+ assert.equal(f.app.preflight.recent[0].mismatchCount,11);assert.equal(f.app.preflight.recent[0].status,'found');
+ assert.equal(f.app.preflight.heldBytes,0);assert.equal(f.app.preflight.waiters,0);
 });

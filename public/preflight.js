@@ -12,10 +12,10 @@
     try {
       const d=await api('/api/preflight');saved=d.rules;
       const enabled=Object.keys(saved).filter(m=>saved[m].enabled).join(', ')||'无';
-      document.getElementById('preflight-summary').textContent=`启用模型：${enabled}；等待原请求 ${d.waitingRequests}；缓存命中 ${d.totals.cacheHits}；探测次数 ${d.totals.attempts}；成功 ${d.totals.found}；阻止原请求 ${d.totals.blocked}。须同时处于“模型固定 / 回灌”模式才生效。`;
+      document.getElementById('preflight-summary').textContent=`启用模型：${enabled}；等待原请求 ${d.waitingRequests}；缓存命中 ${d.totals.cacheHits}；探测次数 ${d.totals.attempts}；成功 ${d.totals.found}；阻止原请求 ${d.totals.blocked}；共享小时额度剩余 ${d.budget?.remaining??'—'}。须同时处于“模型固定 / 回灌”模式才生效。`;
       const rows=[...d.activeJobs,...d.recent].slice(0,30).map(j=>{
         const tr=document.createElement('tr');cells(tr,[time(j.createdAt),j.model,j.attempts+'/'+j.maxAttempts,names[j.status]||j.status,
-          j.lastResult?.responseModel||'—',j.lastResult?.length??'—',j.finishedAt?'已结束':Math.max(0,Math.ceil((j.deadline-Date.now())/1000))+' 秒']);return tr;
+          j.lastResult?.responseModel||'—',j.lastResult?.length??'—',`${j.finishedAt?'已结束':Math.max(0,Math.ceil((j.deadline-Date.now())/1000))+' 秒'}；模型不符 ${j.mismatchCount||0} 次`]);return tr;
       });document.getElementById('preflight-records').replaceChildren(...rows);
       if(!form.dataset.loaded){edit();form.dataset.loaded='1';}
     }catch(e){notify(e.message);}finally{busy=false;}
@@ -27,6 +27,7 @@
     if(f.enabled.checked && !confirm('开启后会在原请求之前自动发起可能计费的探测。模型/账号/轮次复用有风险；失败策略为返回错误时，原请求不会送出。确认开启？'))return;
     const r={enabled:f.enabled.checked,failurePolicy:f.failurePolicy.value};
     for(const k of ['maxAttempts','maxWaitSeconds','intervalSeconds','cooldownSeconds'])r[k]=Number(f[k].value);
+    if(r.enabled&&r.maxWaitSeconds>90&&!confirm('前置探测总等待超过 90 秒。客户端或 Cloudflare 可能提前超时，断开后会取消探测；更多次试验建议使用上面的独立主动探测。仍要保存？'))return;
     try{
       const latest=await api('/api/preflight');
       const d=await api('/api/preflight/config',{rules:{...latest.rules,[model]:r},acknowledgeBillable:true,acknowledgeExperimental:true});saved=d.rules;

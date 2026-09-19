@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1
+
+- Manual and request-time probes retry successful-HTTP model mismatches as well as length misses. Exact model/length and completion checks remain mandatory for adoption.
+- Remove the ten-attempt validator and HTML caps. Positive safe-integer attempt counts are supported; explicit wall-clock limits and shared hourly usage remain enforced.
+- Add configurable manual run time and extend preflight wait configuration to 5–3600 seconds, with client/CDN timeout warnings.
+- Add protected, persistent hourly quota configuration without clearing usage; expose remaining usage and retry progress in the console and CLI.
+- Bound manual per-job attempt history to the latest 100 entries; keep totals and rotated audit records.
+- Add regression scenarios that return eleven wrong models before accepting the twelfth response, plus exhaustion, cancellation, quota persistence and management authentication tests.
+
 ## 0.4.0
 
 - Optional, default-off synchronous request-time preflight for configured models. Hold original bytes, probe a short payload, dispatch original exactly once after a qualified state hit.
