@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2
+
+- Keep live pins and their renewal schedules on ordinary failed/incomplete generations, generic 409/5xx and rate limits; do not replay original requests.
+- Invalidate only the pin actually used on authentication rejection, model mismatch/conflict or narrowly classified structured state rejection.
+- Deduplicate invalidation events, link them to request records, and record closed-set error categories without free-form messages.
+- Count HTTP-200 SSE failures as failed requests and show pin retention/invalidation and discovery triggers in the existing 20-row UI.
+- Preserve all existing model rules, states, expiry timestamps and automatic renewal timing.
+
 ## 0.6.1
 
 - Default recent request/state records to 20 per page; add previous/next, page jump and return-to-latest controls.

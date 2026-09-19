@@ -1,6 +1,6 @@
 {
   "name": "@babadaren/sub2api-turnstate",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Optional Sub2API ingress extension with per-model turn-state rules, authenticated dashboard and reversible Nginx takeover.",
   "license": "MIT",
   "type": "module",
@@ -22,7 +22,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "start": "node bin/turnstate.mjs serve",
-    "check": "node --check lib/server.mjs && node --check lib/automatic.mjs && node --check lib/probe-transport.mjs && node --check lib/states.mjs && node --check bin/turnstate.mjs && node --check public/app.js && node --check lib/records-page.mjs && node --check public/records.js"
+    "check": "node --check lib/server.mjs && node --check lib/automatic.mjs && node --check lib/probe-transport.mjs && node --check lib/states.mjs && node --check bin/turnstate.mjs && node --check public/app.js && node --check lib/records-page.mjs && node --check public/records.js && node --check lib/failure-policy.mjs && node --check lib/response-meta.mjs"
   },
   "author": "babadaren",
   "repository": {
