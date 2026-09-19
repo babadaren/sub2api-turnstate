@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Optional, default-off synchronous request-time preflight for configured models. Hold original bytes, probe a short payload, dispatch original exactly once after a qualified state hit.
+- Per-model maximum attempts, total deadline, interval, failure cooldown and explicit reject/passthrough policy. Same-binding single-flight and bounded waiters/memory.
+- Shared persistent hourly probe budget; cancellation on client disconnect, mode changes and rule/refresh changes. No account/egress proxy changes.
+- Authenticated console settings/progress, preflight CLI controls and qualified cache metadata. Model mismatch remains a hard stop, not evidence that a length is usable.
+
+
 ## 0.3.1
 
 - Fix legitimate multi-megabyte request models disappearing from diagnostics (8 MiB bounded default).

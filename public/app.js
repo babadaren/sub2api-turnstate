@@ -59,7 +59,7 @@ function renderPins(data) {
     const card = text('article', '', 'pin-card');
     card.append(text('h3', pin.model), text('p', `${pin.length} 字节 · ${data.mode === 'pin' && pin.status === 'candidate' ? '固定中' : pin.status === 'candidate' ? '候选（未回灌）' : '待刷新'}`, 'pin-label'), text('code', pin.preview));
     const clock = text('p', ''); clock.dataset.expires = pin.expiresAt; card.append(clock);
-    card.append(text('p', `隔离：${pin.scope} · 客户标识 ${pin.client} · 会话 ${pin.session || '—'}`, 'hint'), text('p', `指纹 ${pin.fingerprint} · 采集 ${time(pin.capturedAt)} · 来源 ${pin.source}`, 'hint'));
+    card.append(text('p', `隔离：${pin.scope} · 客户标识 ${pin.client} · 会话 ${pin.session || '—'}`, 'hint'), text('p', `指纹 ${pin.fingerprint} · 采集 ${time(pin.capturedAt)} · 来源 ${pin.source} · 前置缓存：${pin.verifiedModel === pin.model ? '响应模型已核对' : '未核对'}`, 'hint'));
     const actions = text('div', '', 'buttons');
     actions.append(button('查看完整值', async () => {
       const old = card.querySelector('.revealed-state'); if (old) { old.remove(); return; }
@@ -88,7 +88,7 @@ async function refresh() {
     if (data.persistError) notify('警告：状态文件写入失败，目前只保存在内存中，请检查磁盘和权限。');
     $('observed').replaceChildren(...data.observed.map(o => { const tr = document.createElement('tr'); cells(tr, [o.model,histogram(o.requestLengths),histogram(o.responseLengths),time(o.lastSeen)]); return tr; }));
     $('records').replaceChildren(...logs.records.map(r => { const tr = document.createElement('tr'); cells(tr, [time(r.time),r.kind === 'request' ? `${r.method} ${r.path}` : `${r.kind} / ${r.action}`,modelRecord(r),r.status,
-      r.requestStateLength === undefined ? '—' : `${r.requestStateLength} → ${r.forwardedStateLength}`,r.responseStateLength === undefined ? '—' : `${r.responseStateLength} → ${r.returnedStateLength}`,r.headersMs == null ? '—' : `${r.headersMs} ms`,[r.requestAction,r.responseAction,r.error].filter(Boolean).join(' / ')]); return tr; }));
+      r.requestStateLength === undefined ? '—' : `${r.requestStateLength} → ${r.forwardedStateLength}`,r.responseStateLength === undefined ? '—' : `${r.responseStateLength} → ${r.returnedStateLength}`,r.headersMs == null ? '—' : `${r.headersMs} ms` + (r.preflight?.waitMs ? `（前置等待 ${r.preflight.waitMs} ms）` : ''),[r.requestAction,r.responseAction,r.error,r.preflight?.handled ? ('preflight:'+r.preflight.action) : null].filter(Boolean).join(' / ')]); return tr; }));
   } finally { loading = false; }
 }
 $('login-form').onsubmit = async event => { event.preventDefault(); try { const form = new FormData(event.target); const result = await api('/api/login', { username: form.get('username'), password: form.get('password') }); csrf = result.csrf; event.target.elements.password.value = ''; notify(''); await refresh(); } catch(e) { notify(e.message); } };

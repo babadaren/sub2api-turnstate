@@ -94,6 +94,14 @@ test('real nginx: rewritten paths, direct non-Codex route, backup on refused con
   const before = seen.length;
   response = await fetch(`${url}/v1/responses`, { method: 'POST', headers: { 'x-test-fail': '1' }, body: '{}' }); await response.text();
   assert.equal(response.status, 502); assert.equal(seen.length, before + 1);
+  // A generated 503 from strict preflight must NOT fall through to the backup
+  // and submit the original POST despite the admission failure.
+  app.setMode('pin');
+  app.preflight.configure({'gpt-6-astra':{enabled:true}},true);
+  const gateBefore=seen.length;
+  response=await fetch(`${url}/v1/responses`,{method:'POST',headers:{authorization:'Bearer fake-key','session-id':'gate-test','content-type':'application/json'},body:JSON.stringify({model:'gpt-6-astra',input:'original must not be sent'})});
+  assert.equal(response.status,503);await response.text();assert.equal(seen.length,gateBefore+1);
+  app.preflight.configure({'gpt-6-astra':{enabled:false}});app.setMode('drop312');
   await app.close(100); closed = true;
   response = await fetch(`${url}/v1/responses`, { method: 'POST', headers: { 'x-codex-turn-state': 'Q'.repeat(312) }, body: '{}' });
   assert.equal(response.status, 200); await response.text(); assert.equal(seen.at(-1).state.length, 312);

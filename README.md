@@ -19,7 +19,7 @@ GitHub Release 提供标准 npm tarball；这是 **GitHub 发布资产，不代�
 ```bash
 # 建议使用私有 prefix，避免与系统已有 CLI 冲突。
 npm install -g --prefix /opt/sub2api-turnstate/npm --ignore-scripts \
-  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.3.1/babadaren-sub2api-turnstate-0.3.1.tgz
+  https://github.com/babadaren/sub2api-turnstate/releases/download/v0.4.0/babadaren-sub2api-turnstate-0.4.0.tgz
 
 # 使用 Node 22+ 运行安装入口。安装会创建 systemd 服务、自动启动并设置开机启动。
 # --nginx-conf 指向你现有的 Sub2API 反向代理配置。
@@ -204,3 +204,18 @@ Optional fields in the private `config.json` are `requestMetadataMaxBytes` (defa
 New records contain `requestModelReason`, `responseModelReason`, response completion/failure flags and a validated upstream request ID where available. The console distinguishes body limits, response inspection limits, missing model fields, compressed bodies, concurrency bypass, and historical records lacking diagnostics. It never replaces a missing response model with the request model. Old log records are not retroactively rewritten.
 
 The 292/312 presets remain an opt-in heuristic, not a protocol validity test. HTTP 200 alone also does not guarantee a successful SSE completion. Compare `responseCompleted`, `responseFailed`, application errors and real same-turn continuation behaviour. The repair does not change your model policies, start probes, replace outbound proxies or obtain a 292 value automatically.
+
+
+## v0.4.0：请求前自动探测
+
+新增独立、默认关闭的前置开关。完整 HTTP 请求到达后，先查对应绑定有没有未过期、长度匹配且响应模型已核对的固定值；有则立即使用，没有则暂存原请求，仅发送短探测。命中后原请求发送一次。最大次数（含第一次）、总等待时间和失败策略可配置。上限耗尽可选择返回 503、不发原请求，或明确原样放行。
+
+模型不符、401/403/429、超时等不无限重试。相同绑定并发只探测一次；失败冷却和跨手动/自动的每小时 30 次预算防止收费风暴。不会改变 Sub2API 出站代理，不把其他模型或 API Key 的 state 混用。前置检查不能证明上游真正执行的底层模型。
+
+控制台新增“请求前自动探测”设置及进度。安装/升级不自动启用此收费功能；全局也须处于 pin 模式。详见 [配置、时序、命令与限制](deploy/PREFLIGHT.md)。
+
+```bash
+sudo turnstate preflight-status
+sudo turnstate preflight-config --file ./preflight.json --ack-billable --ack-experimental
+sudo turnstate preflight-disable
+```

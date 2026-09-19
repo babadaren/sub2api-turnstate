@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Turn-State 控制台</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/probe.js" defer></script></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Turn-State 控制台</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/probe.js" defer></script><script src="/preflight.js" defer></script></head>
 <body><main>
 <header><div><p class="eyebrow">SUB2API · OPTIONAL INGRESS EXTENSION</p><h1>Turn-State 控制台</h1><p>按模型管理状态 · 独立启停 · 保留 sub2api 原有出站代理</p></div><span id="badge">未登录</span></header>
 <section id="login"><h2>管理员登录</h2><form id="login-form"><label>用户名<input name="username" autocomplete="username" value="admin" required></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">登录控制台</button></form></section>
@@ -8,7 +8,20 @@
 <div class="metrics"><section><small>本进程请求 / 握手</small><strong id="requests">0</strong></section><section><small>失败请求 / 握手</small><strong id="failures">0</strong></section><section><small>状态头处理次数</small><strong id="removed">0</strong></section><section><small>活动连接 / 请求</small><strong id="active">0</strong></section></div>
 <section><div class="row"><h2>模型规则</h2><button id="new-rule">添加模型</button></div><p class="hint">gpt-6-astra 的 292 / 312 只是用户提供的预置规则。其他模型不猜测长度；先在下方观察分布，再配置。每个模型单独控制有效长度、丢弃长度和刷新周期。</p><div class="table-wrap"><table><thead><tr><th>模型</th><th>状态</th><th>固定长度</th><th>丢弃长度</th><th>刷新周期</th><th>隔离范围</th><th>操作</th></tr></thead><tbody id="rules"></tbody></table></div>
 <form id="rule-form" hidden><h3 id="rule-title">模型配置</h3><div class="form-grid"><label>模型标识<input name="model" placeholder="gpt-5.6-sol" required maxlength="100"></label><label>固定长度（逗号分隔；未知可留空）<input name="pinLengths" placeholder="例如 292 或 280,296"></label><label>丢弃长度（可留空）<input name="discardLengths" placeholder="例如 312"></label><label>刷新周期（秒，30–86400）<input name="ttlSeconds" type="number" min="30" max="86400" value="300" required></label><label>状态隔离范围<select name="scope"><option value="turn">API Key + 模型 + 会话 + 显式轮次</option><option value="session" selected>API Key + 模型 + 会话（实验）</option><option value="credential">API Key + 模型（更宽，慎用）</option></select></label><label>未知长度<select name="unknownPolicy"><option value="pass">原样透传（推荐）</option><option value="drop">丢弃（实验）</option></select></label></div><label class="check"><input name="enabled" type="checkbox">启用此模型规则</label><label class="check"><input name="autoLearn" type="checkbox">有效长度为空时，允许从成功响应自动学习候选长度（不证明可用性）</label><p class="hint">前置扩展不知道 sub2api 内部选中的上游账号。账号池切换、跨轮复用可能导致错误；生产环境先观察，固定模式用于已验证的粘性会话 / 单账号链路。没有隔离标识的请求只观察，不混用其他会话状态。</p><div class="buttons"><button type="submit">保存规则</button><button type="button" id="cancel-rule" class="secondary">取消</button></div></form></section>
-<section><h2>主动探测（可能计费）</h2>
+<section><h2>请求前自动探测（可能计费）</h2>
+<p class="hint">可选功能，默认关闭。收到已配置模型的完整 HTTP 请求时，先检查对应绑定有无符合目标长度、响应模型已核对且未过期的状态。有则直接使用；没有则暂存原请求，只发简短探测，命中后发送原请求一次。长度和本地 TTL 不能证明上游真实有效性。</p>
+<form id="preflight-form"><div class="form-grid">
+<label>目标模型<input name="model" value="gpt-6-astra" maxlength="100" required></label>
+<label>最大尝试次数（含第一次）<input name="maxAttempts" type="number" min="1" max="10" value="3" required></label>
+<label>总等待上限（秒）<input name="maxWaitSeconds" type="number" min="5" max="60" value="45" required></label>
+<label>尝试间隔（秒）<input name="intervalSeconds" type="number" min="2" max="10" value="2" required></label>
+<label>失败冷却（秒）<input name="cooldownSeconds" type="number" min="10" max="600" value="60" required></label>
+<label>探测失败后<select name="failurePolicy"><option value="reject">返回 503，原请求不发送</option><option value="passthrough">原样放行原请求（不保证有固定值）</option></select></label>
+</div><label class="check"><input name="enabled" type="checkbox">启用此模型的请求前探测</label>
+<div class="buttons"><button type="submit">保存前置探测设置</button><button id="preflight-disable" type="button" class="secondary">关闭全部前置探测</button></div></form>
+<p class="hint">目标长度取自上方模型规则，astra 通常配置 292。须同时开启“模型固定 / 回灌”模式。同绑定并发请求合并探测；失败冷却和共享每小时 30 次预算防止请求风暴。认证失败、429、响应模型不符、重定向、5xx 或超时不循环重试。请求模型未识别、超出解析上限或 WebSocket 握手不参与本机制，仍按原逻辑透传。原出站代理不改变。</p>
+<p id="preflight-summary"></p><div class="table-wrap"><table><thead><tr><th>开始时间</th><th>模型</th><th>已试 / 上限</th><th>结果</th><th>响应模型</th><th>长度</th><th>剩余等待</th></tr></thead><tbody id="preflight-records"></tbody></table></div></section>
+<section><h2>手动主动探测（可能计费）</h2>
 <p class="hint">只请求指定模型，不随 luna 等先行请求改变目标。默认最多 3 次，串行、间隔 2 秒，命中即停；认证失败、429、模型不符或超时立即停止。不会切换 172.18.0.1:1081 等出站代理。命中只适用于选定的 API Key / 模型 / 会话，不是全模型通用值。</p>
 <form id="probe-form"><div class="form-grid">
 <label>目标模型<input name="model" value="gpt-6-astra" maxlength="100" required></label>
@@ -21,9 +34,9 @@
 <p class="hint">选择“下一条成功请求”后，再用选定模型和会话发送一条正常消息；本服务只借用该请求的凭据及路由标识，不复制提示词、聊天正文或旧 state。等待 120 秒后自动取消，运行最多 180 秒；每小时最多 30 次尝试。手动方式的会话标识不匹配时，命中也不会用于原会话。正常的到期刷新仍不自动发起付费探测。</p>
 <div class="buttons"><button id="probe-start" type="submit">开始本次主动探测</button><button id="probe-stop" type="button" class="secondary" disabled>停止探测</button></div></form>
 <p id="probe-status" role="status">尚未主动探测</p><div class="table-wrap"><table><thead><tr><th>次数</th><th>时间</th><th>请求模型</th><th>响应声明模型</th><th>HTTP</th><th>state 长度</th><th>结果</th></tr></thead><tbody id="probe-results"></tbody></table></div></section>
-<section><h2>当前固定值 / 候选值</h2><p class="hint">倒计时是本工具的本地刷新周期，不是上游签发的有效期。到期或手动刷新会使旧值失效，等待下一条匹配的成功响应取得新值；不自动生成付费探测。观察模式下这里显示候选值，不会回灌。主动探测命中后来源显示 probe。</p><div id="pins" class="pin-grid"></div></section>
+<section><h2>当前固定值 / 候选值</h2><p class="hint">倒计时是本工具的本地刷新周期，不是上游签发的有效期。到期或手动刷新会使旧值失效，等待下一条匹配的成功响应取得新值；未开启请求前探测时不自动生成付费探测；启用后在下一条匹配请求到达时触发。观察模式下这里显示候选值，不会回灌。主动探测命中后来源显示 probe。</p><div id="pins" class="pin-grid"></div></section>
 <section><h2>实际状态头长度分布</h2><p class="hint">0 表示缺少状态头。请求、响应分别统计。模型无法从请求识别时不会默认归入 gpt-6-astra。记录会区分请求过大、压缩、并发限制和响应未读到声明；旧记录不会补猜模型。</p><div class="table-wrap"><table><thead><tr><th>模型</th><th>请求长度 : 次数</th><th>响应长度 : 次数</th><th>最近出现</th></tr></thead><tbody id="observed"></tbody></table></div></section>
-<section><div class="row"><h2>最近转发记录</h2><label>筛选<select id="filter"><option value="">全部事件</option><option value="request">请求</option><option value="state">状态更新</option><option value="probe">主动探测</option><option value="admin">管理操作</option></select></label></div><p class="hint">不记录 API Key、Cookie、提示词、回答或完整状态。完整固定值仅管理员点选后显示。WebSocket 只统计握手，无法从后续帧补改已经发出的握手头；未知模型握手不固定。超过配置的解析上限（默认 8 MiB） / 编码的请求正文原样转发，不参与模型固定。</p><div class="table-wrap"><table><thead><tr><th>时间</th><th>事件 / 请求</th><th>请求 → 响应声明模型</th><th>状态</th><th>请求 state</th><th>响应 state</th><th>首响应头</th><th>动作</th></tr></thead><tbody id="records"></tbody></table></div></section>
+<section><div class="row"><h2>最近转发记录</h2><label>筛选<select id="filter"><option value="">全部事件</option><option value="request">请求</option><option value="state">状态更新</option><option value="probe">手动探测</option><option value="preflight">前置探测</option><option value="admin">管理操作</option></select></label></div><p class="hint">不记录 API Key、Cookie、提示词、回答或完整状态。完整固定值仅管理员点选后显示。WebSocket 只统计握手，无法从后续帧补改已经发出的握手头；未知模型握手不固定。超过配置的解析上限（默认 8 MiB） / 编码的请求正文原样转发，不参与模型固定。</p><div class="table-wrap"><table><thead><tr><th>时间</th><th>事件 / 请求</th><th>请求 → 响应声明模型</th><th>状态</th><th>请求 state</th><th>响应 state</th><th>首响应头</th><th>动作</th></tr></thead><tbody id="records"></tbody></table></div></section>
 <details><summary>边界与运行说明</summary><p id="notice" class="hint"></p><p>停止处理不停止守护进程。停止服务 / 卸载应使用 SSH 的 turnstate service-stop / uninstall，先撤销 Nginx 接管。刷新等待新响应，不代表会绕过账号或上游配额限制。</p></details>
-</div><p id="message" role="status"></p><footer>v0.3.1 · 数据只存本机 · 管理接口必须通过 HTTPS 或 SSH 隧道访问</footer>
+</div><p id="message" role="status"></p><footer>v0.4.0 · 数据只存本机 · 管理接口必须通过 HTTPS 或 SSH 隧道访问</footer>
 </main></body></html>
