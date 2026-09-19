@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0 (local candidate; not deployed/published)
+
+- Single-switch proactive renewal ten minutes before a one-hour local expiry, with adaptive lead for short TTLs.
+- Keep the old state live until a distinct, verified replacement is available; identical state never extends expiry.
+- Bounded memory-only routing identity registry, cleared on stop/restart/config change; explicit waiting-credentials UI.
+- Same-binding discovery/renewal single-flight, generation-safe replacement, protection against late response rollback.
+- Existing in-flight requests keep their dispatched state; new requests use the replacement.
+- Renewal network errors preserve old state, back off and honor Retry-After; authentication rejection requires fresh traffic.
+
+
 ## 0.5.0
 
 - Replace manual probing, separate preflight switches, retry-count/time controls and shared quotas with one authenticated start/stop switch.

@@ -55,7 +55,7 @@ test('different credentials never borrow a pin',async t=>{
  const f=await fixture(t,(e,res)=>reply(res));let r=await f.send();await r.text();r=await f.send({headers:{...headers,authorization:'Bearer other-key'}});await r.text();assert.equal(f.seen.filter(e=>e.probe).length,2);
 });
 test('expired or manual-refresh state automatically reprobes on the next request',async t=>{
- const f=await fixture(t,(e,res)=>reply(res));let r=await f.send();await r.text();const ctx=f.app.states.context(model,headers);f.app.states.pins.get(ctx.id).expiresAt=0;r=await f.send();await r.text();f.app.states.refresh({model});r=await f.send();await r.text();assert.equal(f.seen.filter(e=>e.probe).length,3);
+ let n=0;const f=await fixture(t,(e,res)=>{if(e.probe)n++;res.writeHead(200,{'content-type':'application/json','x-codex-turn-state':String.fromCharCode(65+n).repeat(292)});res.end(JSON.stringify({model,status:'completed'}));});let r=await f.send();await r.text();const ctx=f.app.states.context(model,headers);f.app.states.pins.get(ctx.id).expiresAt=0;r=await f.send();await r.text();f.app.states.refresh({model});r=await f.send();await r.text();assert.equal(f.seen.filter(e=>e.probe).length,3);
 });
 test('wrong-model original response invalidates only the state used; no automatic original replay',async t=>{
  const f=await fixture(t,(e,res)=>reply(res,292,e.probe?model:'gpt-5.6-luna'));const r=await f.send();await r.text();assert.equal(f.seen.length,2);assert.equal(f.app.states.liveForPreflight(f.app.states.context(model,headers)),null);

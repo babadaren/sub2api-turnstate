@@ -17,7 +17,11 @@ Unknown models do not inherit astra's length. Automatic probing can keep incurri
 while a connected target request waits; there is no hourly quota or total retry limit in v0.5.
 The authenticated start/stop control is authorization for that automatic processing.
 Pacing, bounded in-memory waiters, individual socket timeouts and explicit auth/rate-limit
-errors remain. No probe credentials are stored for idle/background use.
+errors remain. In v0.6, renewal credentials can remain in bounded process memory as described below; they are never persisted to disk or exposed in snapshots.
 
 TLS/DNS setup never exposes login in plaintext while waiting for a certificate. Avoid broad
 proxy retries: an already accepted generation must not be replayed to the backup server.
+
+
+## v0.6.0 proactive renewal
+Allowlisted authentication and routing identifiers are retained only in bounded process memory (at most 128 binding slots) after a qualified binding is seen. This enables unattended renewal even with no new foreground request. These values never enter logs, status snapshots, files or a release package. Stop, shutdown, configuration change and slot eviction clear their references; immutable JavaScript strings cannot be guaranteed cryptographically zeroized. On restart the operator must send a normal target request to re-arm the plan. Renewal probes may be billed while the switch remains enabled. Never substitute a wrong-model or identical old state to claim a renewed validity period.
