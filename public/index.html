@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Turn-State 控制台</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Turn-State 控制台</title><link rel="stylesheet" href="/style.css"><script src="/records.js" defer></script><script src="/app.js" defer></script></head>
 <body><main>
 <header><div><p class="eyebrow">SUB2API · TURN-STATE</p><h1>自动探测与固定</h1><p>一个开关 · 自动获取 · 提前更新 · 保留原出站代理</p></div><span id="badge">未登录</span></header>
 <section id="login"><h2>管理员登录</h2><form id="login-form"><label>用户名<input name="username" autocomplete="username" value="admin" required></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">登录</button></form></section>
@@ -11,10 +11,14 @@
 <div class="metrics"><section><small>已完成转发 / 请求</small><strong id="requests">0</strong></section><section><small>等待固定值</small><strong id="waiting">0</strong></section><section><small>直接使用固定值</small><strong id="cache-hits">0</strong></section><section><small>自动探测命中</small><strong id="found">0</strong></section></div>
 <section><h2>自动探测进度</h2><p id="auto-summary"></p><div class="table-wrap"><table><thead><tr><th>开始时间</th><th>目标模型</th><th>已探测</th><th>状态</th><th>响应模型</th><th>长度</th><th>下一次</th></tr></thead><tbody id="auto-records"></tbody></table></div></section>
 <section><h2>当前固定值</h2><p class="hint">分别显示旧值到期与提前探测时间，均为本地计划而非上游签发的真实有效期。1 小时周期提前 10 分钟更新；较短周期自动缩短提前量。新的模型声明和长度均匹配才替换；相同旧值不重置到期时间。重启后显示“等待请求提供认证”时，发送一条正常目标请求即可恢复计划。292 不用于猜测其他模型。</p><div id="pins" class="pin-grid"></div></section>
-<section><h2>最近请求与状态记录</h2><p class="hint">不记录密钥、Cookie、提示词、回答或完整状态。关闭时请求正文不参与模型解析；旧记录保留。请求记录在响应结束后写入。</p><div class="table-wrap"><table><thead><tr><th>时间</th><th>事件 / 路径</th><th>请求 → 响应声明模型</th><th>HTTP</th><th>请求 state</th><th>响应 state</th><th>动作</th></tr></thead><tbody id="records"></tbody></table></div></section>
+<section id="request-records"><h2>最近请求与状态记录</h2><p class="hint">不记录密钥、Cookie、提示词、回答或完整状态。关闭时请求正文不参与模型解析；旧记录保留。请求记录在响应结束后写入。默认显示最新 20 条，其余在现有记录保留范围内分页查看；翻页时暂停本表自动刷新，不影响上方运行状态。</p><div class="table-wrap"><table><thead><tr><th>时间</th><th>事件 / 路径</th><th>请求 → 响应声明模型</th><th>HTTP</th><th>请求 state</th><th>响应 state</th><th>动作</th></tr></thead><tbody id="records"></tbody></table></div><div class="records-pagination" aria-label="请求记录分页">
+<p id="records-page-info" class="hint" aria-live="polite">正在读取记录</p>
+<div class="buttons"><button id="records-latest" type="button" class="secondary">最新 20 条</button><button id="records-prev" type="button" class="secondary" disabled>上一页</button><button id="records-next" type="button" class="secondary" disabled>下一页</button></div>
+<form id="records-jump"><label for="records-page">跳至</label><input id="records-page" type="number" min="1" step="1" value="1" required aria-label="记录页码"><span>页</span><button id="records-go" type="submit" class="secondary">跳转</button></form>
+</div><p id="records-live-status" class="hint" role="status"></p></section>
 <details id="model-details"><summary>模型规则（可选；原有配置已保留）</summary><section><p class="hint">只需在接入其他模型时配置目标长度。未配置或未启用的模型保持透传；全局启动/关闭不修改已有规则。刷新周期与隔离范围沿用已有值，新规则使用会话隔离。</p><div class="table-wrap"><table><thead><tr><th>模型</th><th>目标长度</th><th>刷新周期</th><th>操作</th></tr></thead><tbody id="rules"></tbody></table></div><button id="new-rule" class="secondary">添加模型</button>
 <form id="rule-form" hidden><div class="form-grid"><label>模型名称<input name="model" required maxlength="100"></label><label>目标长度（逗号分隔）<input name="pinLengths" required placeholder="292"></label><label>不采纳长度（可留空）<input name="discardLengths" placeholder="312"></label></div><p class="hint">保存会启用此模型规则并清除该模型的旧绑定。不会验证目标长度本身是否适用于上游。</p><div class="buttons"><button type="submit">保存模型规则</button><button id="cancel-rule" type="button" class="secondary">取消</button></div></form></section></details>
 <p class="hint">适用范围：可解析的 HTTP Responses 请求。WebSocket 握手、压缩或超过解析上限的请求保持透传。前置扩展无法感知 sub2api 内部账号切换，跨轮复用仍是兼容实验。上游模型声明和长度匹配不证明实际底层模型身份。</p>
 <div class="buttons"><button id="logout" class="secondary">退出登录</button></div>
-</div><p id="message" role="status"></p><footer>v0.6.0 · 单开关自动模式 · 提前更新凭据只驻留内存</footer>
+</div><p id="message" role="status"></p><footer>v0.6.1 · 单开关自动模式 · 提前更新凭据只驻留内存</footer>
 </main></body></html>

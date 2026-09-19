@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1
+
+- Default recent request/state records to 20 per page; add previous/next, page jump and return-to-latest controls.
+- Paginate the full existing recent-record retention window with server-side totals and stable anchors; retain kind/status filters and explicit legacy limit support.
+- Historical pages stop polling and stay in place while status, pins and renewal monitoring keep refreshing. Expired anchors recover explicitly, and logout invalidates pending page responses.
+- No changes to automatic probing, renewal, model rules or outbound proxy handling.
+
 ## 0.6.0 (local candidate; not deployed/published)
 
 - Single-switch proactive renewal ten minutes before a one-hour local expiry, with adaptive lead for short TTLs.
