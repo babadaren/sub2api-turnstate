@@ -196,3 +196,10 @@ node deploy/migrate-model-sharing.mjs --home /var/lib/sub2api-turnstate --apply
 代理连接禁止本机/私网 IPv4，公网域名在连接前解析检查并固定所选地址。上游 TLS 校验不关闭；不解密第三方流量，不导出上游证书或私钥。HTTP/SOCKS5 的代理认证本身不加密，HTTPS CONNECT 可保护第一跳；上游模型请求始终在独立 TLS 内发送。
 
 测试见 `TEST_PROXY_POOL.md`。这是可配置的独立探测能力；未提供上游认证时，不把仅验证代理连接写成模型探测成功。
+
+
+## v0.10.1：独立节点缺少 Content-Type 时继续探测
+
+只修复独立代理探测路径，不修改 sub2api 的正式转发链路。HTTP 2xx 的非目标长度（例如 312）直接记为长度未命中并继续本轮下一节点，不因缺少 Content-Type 提前停止。目标长度响应如果缺少类型、标为 text/plain 或 application/octet-stream，使用有限前缀识别 SSE/JSON；必须存在成功终态才可固定。支持有界 gzip/deflate/Brotli 解码，压缩损坏、错误页或未完成生成不能被采纳。显式请求 identity，仍尊重实际 Content-Encoding。
+
+响应格式错误可以在本轮内顺序尝试下一节点；全部节点用尽后回到原 sub2api，401/403/429 仍停止而不通过换出口绕过拒绝。正常请求仍执行既有严格准入，未取得目标值时可能返回 503；本修复不保证上游一定返回 292。新增日志记录规范化响应类型、压缩类型和识别方式，不保存正文、Token 或完整 state。

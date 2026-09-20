@@ -14,7 +14,7 @@ function createProxyPoolPanel({api,notice}) {
   function clientChoices(){const a=data?.localAuth?.accounts.find(a=>String(a.id)===$('pool-local-account').value);
     choices($('pool-local-client'),a?.clients||[],data?.profile?.clientKeyId,c=>`API Key #${c.id} · 分组 ${c.groupId}`);
     $('pool-local-save').disabled=!a?.ready||!a.clients.length;}
-  const resultText=n=>{const r=n.lastResult;if(!r)return '未检查';const p=r.probe,c=r.connectivity;return [c?(c.ok?`出口 ${c.exitIP} · ${c.country||'地区未知'}`:`连接检查：${c.error}`):'',p?`探测 ${p.status} · ${p.length} 字节 · ${p.responseModel||'未声明'} · ${p.outcome}`:''].filter(Boolean).join('；');};
+  const resultText=n=>{const r=n.lastResult;if(!r)return '未检查';const p=r.probe,c=r.connectivity;return [c?(c.ok?`出口 ${c.exitIP} · ${c.country||'地区未知'}`:`连接检查：${c.error}`):'',p?`探测 ${p.status} · ${p.length} 字节 · ${p.responseModel||'未声明'} · ${p.outcome}${p.responseContentType==='missing'?' · 上游未提供类型，按长度/正文识别':''}${p.responseDetection?' · '+p.responseDetection:''}`:''].filter(Boolean).join('；');};
   function render(d) {
     data=d;$('pool-toggle').textContent=d.enabled?'关闭节点探测':'开启节点探测';
     $('pool-toggle').disabled=busy||(!d.enabled&&(!d.ready||!d.nodes.some(n=>n.enabled)));

@@ -1,3 +1,9 @@
+## 0.10.1
+- Fix premature proxy-pool termination on HTTP 200 / non-target state with missing Content-Type.
+- Probe-only bounded SSE/JSON detection and gzip/deflate/Brotli decoding; require successful terminal response.
+- Continue format misses through the node round, retain explicit auth/rate-limit stops and normal Sub2API routing.
+- Add content type/encoding/detection diagnostics and regression tests.
+
 # v0.9.0
 
 - Optional encrypted HTTP/HTTPS/SOCKS5 proxy-node maintenance and ordered probe-only rotation.
