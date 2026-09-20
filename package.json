@@ -1,6 +1,6 @@
 {
   "name": "@babadaren/sub2api-turnstate",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Optional Sub2API ingress extension with per-model turn-state rules, authenticated dashboard and reversible Nginx takeover.",
   "license": "MIT",
   "type": "module",
@@ -22,7 +22,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "start": "node bin/turnstate.mjs serve",
-    "check": "node --check lib/server.mjs && node --check lib/automatic.mjs && node --check lib/probe-transport.mjs && node --check lib/states.mjs && node --check bin/turnstate.mjs && node --check public/app.js && node --check lib/records-page.mjs && node --check public/records.js && node --check lib/failure-policy.mjs && node --check lib/response-meta.mjs && node --check deploy/migrate-model-sharing.mjs && node --check lib/proxy-pool.mjs && node --check lib/proxy-probe.mjs && node --check lib/proxy-tunnel.mjs && node --check public/proxy-pool.js"
+    "check": "node --check lib/server.mjs && node --check lib/automatic.mjs && node --check lib/probe-transport.mjs && node --check lib/states.mjs && node --check bin/turnstate.mjs && node --check public/app.js && node --check lib/records-page.mjs && node --check public/records.js && node --check lib/failure-policy.mjs && node --check lib/response-meta.mjs && node --check deploy/migrate-model-sharing.mjs && node --check lib/proxy-pool.mjs && node --check lib/proxy-probe.mjs && node --check lib/proxy-tunnel.mjs && node --check public/proxy-pool.js && node --check lib/local-auth.mjs"
   },
   "author": "babadaren",
   "repository": {
