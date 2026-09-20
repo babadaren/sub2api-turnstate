@@ -106,12 +106,12 @@ test('same request failure does not revoke the replacement acquired during its s
   assert.equal(f.app.journal.recent.filter(x=>x.action==='invalidated_response').length,0);
 });
 
-test('model mismatch and conflicting declarations are still invalidation evidence',async t=>{
+test('response-model differences and conflicts are diagnostic only in length mode',async t=>{
   for(const conflict of [false,true])await t.test(conflict?'conflict':'mismatch',async st=>{
     const text=(conflict?event({type:'response.created',response:{model}}):'')+event({type:'response.completed',response:{model:'gpt-5.6-luna',status:'completed'}});
     const f=await fixture(st,(_e,res)=>sendFailure(res,text));await (await f.send()).text();
-    assert.equal(f.app.states.liveForPreflight(f.ctx),null);assert.equal(f.seen.length,1);
-    assert.equal(f.app.journal.recent.findLast(x=>x.action==='invalidated_response').reason,conflict?'response_model_conflict':'response_model_mismatch');
+    assert.equal(f.app.states.liveForPreflight(f.ctx),f.pin);assert.equal(f.seen.length,1);
+    assert.equal(f.app.journal.recent.filter(x=>x.action==='invalidated_response').length,0);assert.equal(f.app.journal.recent.findLast(x=>x.kind==='request').responseModelConflict,conflict);
   });
 });
 

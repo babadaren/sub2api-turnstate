@@ -52,9 +52,12 @@ test('real nginx: rewritten paths, direct non-Codex route, backup on refused con
   const dir = temp(t), home = path.join(dir, 'home'); fs.mkdirSync(home);
   const seen = [];
   const origin = http.createServer(async (req, res) => {
-    for await (const _ of req) {}
-    seen.push({ path: req.url, state: req.headers['x-codex-turn-state'] });
-    res.writeHead(req.headers['x-test-fail'] ? 502 : 200, { 'content-type': 'application/json', 'x-codex-turn-state': 'R'.repeat(312) });
+    let body='';for await (const part of req) body+=part;
+    const probe=body && JSON.parse(body).input==='ping';
+    seen.push({ path: req.url, state: req.headers['x-codex-turn-state'],probe });
+    // Use a real HTTP probe error. A 312 response now correctly keeps retrying,
+    // even without a model name, so it is not a deterministic gate rejection.
+    res.writeHead(req.headers['x-test-fail'] || probe ? 502 : 200, { 'content-type': 'application/json', 'x-codex-turn-state': 'R'.repeat(312) });
     res.end(JSON.stringify({ path: req.url }));
   });
   origin.listen(0, '127.0.0.1'); await once(origin, 'listening');

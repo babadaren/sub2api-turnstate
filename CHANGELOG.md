@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- Add per-model enable, disable and delete plus an explicit enabled checkbox on save. Targeted cancellation releases held originals and preserves unrelated renewal plans.
+- Length-based acceptance now spans transport, adoption, cache replay, renewal and invalidation. Response model names remain truthful diagnostics, not equality gates.
+- Continue requiring successful responses, safe single headers, configured lengths and request-model/credential binding. Preserve legacy qualified pins without extending expiry.
+- Keep original payloads, output, egress proxy, pagination, ordinary-error policy and authentication/CSRF unchanged.
+
+
 ## 0.6.2
 
 - Keep live pins and their renewal schedules on ordinary failed/incomplete generations, generic 409/5xx and rate limits; do not replay original requests.

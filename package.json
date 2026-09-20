@@ -1,6 +1,6 @@
 {
   "name": "@babadaren/sub2api-turnstate",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Optional Sub2API ingress extension with per-model turn-state rules, authenticated dashboard and reversible Nginx takeover.",
   "license": "MIT",
   "type": "module",
