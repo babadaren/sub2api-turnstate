@@ -1,3 +1,10 @@
+# v0.9.0
+
+- Optional encrypted HTTP/HTTPS/SOCKS5 proxy-node maintenance and ordered probe-only rotation.
+- Explicit upstream source credentials and client binding; no automatic Sub2API secret extraction.
+- Whole-round fallback, cancellation, provenance and non-model exit connectivity checks.
+- No original egress, model-rule or pinned TTL changes.
+
 # Changelog
 
 ## 0.8.0
