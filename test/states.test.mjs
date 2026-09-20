@@ -13,10 +13,10 @@ function fixture(t) {
 }
 test('local refresh countdown expires; identical responses do not extend the timer forever',t=>{
   const {store,ctx,tick}=fixture(t);store.decide(ctx(),'A'.repeat(292),'response','pin');
-  tick(200000);store.decide(ctx(),'A'.repeat(292),'response','pin');assert.equal(store.snapshot().pins[0].remainingSeconds,100);
+  tick(3500000);store.decide(ctx(),'A'.repeat(292),'response','pin');assert.equal(store.snapshot().pins[0].remainingSeconds,100);
   tick(101000);const d=store.decide(ctx(),'A'.repeat(292),'request','pin');assert.equal(d.action,'refresh_wait_response');assert.equal(d.outgoingLength,0);
   assert.equal(store.snapshot().pins[0].remainingSeconds,0);
-  store.decide(ctx(),'B'.repeat(292),'response','pin');assert.equal(store.snapshot().pins[0].remainingSeconds,300);
+  store.decide(ctx(),'B'.repeat(292),'response','pin');assert.equal(store.snapshot().pins[0].remainingSeconds,3600);
 });
 test('manual refresh invalidates already in-flight responses and never seeds from request headers',t=>{
   const {store,ctx}=fixture(t);const old=ctx();store.decide(old,'A'.repeat(292),'response','pin');

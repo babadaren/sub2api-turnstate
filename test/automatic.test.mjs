@@ -51,8 +51,8 @@ test('disconnected client cancels infinite retry and discards the unsent origina
 test('simultaneous same-binding requests share one probe, each original forwarded once',async t=>{
  let arrive,release;const arrived=new Promise(r=>arrive=r),hold=new Promise(r=>release=r);const f=await fixture(t,async(e,res)=>{if(e.probe){arrive();await hold;}reply(res);});t.after(()=>release());const a=f.send();await arrived;const b=f.send();await delay(30);assert.equal(f.app.automatic.waiters,2);release();for(const r of await Promise.all([a,b])){assert.equal(r.status,200);await r.text();}assert.deepEqual(f.seen.map(e=>e.probe),[true,false,false]);
 });
-test('different credentials never borrow a pin',async t=>{
- const f=await fixture(t,(e,res)=>reply(res));let r=await f.send();await r.text();r=await f.send({headers:{...headers,authorization:'Bearer other-key'}});await r.text();assert.equal(f.seen.filter(e=>e.probe).length,2);
+test('credential isolation remains available instead of model-wide sharing',async t=>{
+ const f=await fixture(t,(e,res)=>reply(res));const rules=structuredClone(f.app.states.rules);rules[model].scope='credential';f.app.states.configure(rules);let r=await f.send();await r.text();r=await f.send({headers:{...headers,authorization:'Bearer other-key'}});await r.text();assert.equal(f.seen.filter(e=>e.probe).length,2);
 });
 test('expired or manual-refresh state automatically reprobes on the next request',async t=>{
  let n=0;const f=await fixture(t,(e,res)=>{if(e.probe)n++;res.writeHead(200,{'content-type':'application/json','x-codex-turn-state':String.fromCharCode(65+n).repeat(292)});res.end(JSON.stringify({model,status:'completed'}));});let r=await f.send();await r.text();const ctx=f.app.states.context(model,headers);f.app.states.pins.get(ctx.id).expiresAt=0;r=await f.send();await r.text();f.app.states.refresh({model});r=await f.send();await r.text();assert.equal(f.seen.filter(e=>e.probe).length,3);

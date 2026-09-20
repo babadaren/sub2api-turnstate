@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+- New rules default to a 3600-second lifetime; editable TTL and sharing scope are exposed in the dashboard.
+- Model scope shares one state/discovery/renewal across sessions and client keys while forwarding each original with its own authentication.
+- TTL-only edits preserve qualifying pins and re-arm the original timer; explicit scope migration merges to the newest live state without expiry extension.
+- Successful-response-only renewal credentials and per-credential auth failure isolation protect the model-wide cache.
+- Existing disable/delete, length-based acceptance, twenty-record pages and original account proxies remain unchanged.
+
+
 ## 0.7.0
 
 - Add per-model enable, disable and delete plus an explicit enabled checkbox on save. Targeted cancellation releases held originals and preserves unrelated renewal plans.

@@ -1,4 +1,4 @@
-# Sub2API Turn-State · v0.7.0
+# Sub2API Turn-State · v0.8.0
 
 单开关的可选入口扩展。登录控制台后只有一个运行开关：**启动 / 关闭**。
 
@@ -46,7 +46,7 @@ v0.7.0 按用户配置长度采纳，不再要求响应模型与请求模型同�
 
 ```sh
 npm install -g --prefix /opt/sub2api-turnstate/npm --ignore-scripts \
-  ./babadaren-sub2api-turnstate-0.7.0.tgz
+  ./babadaren-sub2api-turnstate-0.8.0.tgz
 
 sudo node /opt/sub2api-turnstate/npm/lib/node_modules/@babadaren/sub2api-turnstate/bin/turnstate.mjs install \
   --admin-origin https://state.example.com --domain state.example.com \
@@ -154,3 +154,27 @@ v0.7.0 中响应声明模型不符/冲突只记录诊断，不再作废固定值
 采纳判定、缓存复用、普通响应处理和提前更新均使用长度模式，而不只是探测入口放宽一次检查。已固定的旧版同名状态可继续使用，不重置原到期时间。新状态记录 `acceptance=length` 以及实际响应声明（兼容字段 verifiedModel 不再表示请求名相等）。手工输入状态不伪装成已经通过真实响应验证。失败响应、重复/非法头、超时和连接错误仍不是长度命中。
 
 本版本不添加代理节点池、不修改 sub2api 源码或原出站代理。验证见 TEST_MODEL_CONTROLS.md。各旧版本测试报告描述各自版本，不代表 v0.7.0 仍强制模型名称相等。
+
+
+## v0.8.0：可编辑时长与按模型共享
+
+新增规则的默认有效期为 **3600 秒**，默认共享范围为 **model（按模型共享）**。控制台编辑支持 30–86400 秒整数和 model / credential / session / turn 四种范围。旧安装仅升级程序不会暗中改变其已有范围；管理员明确切换或使用下面的离线迁移才会改变旧规则。
+
+model 范围忽略会话和客户端 API Key 的差异，同一个请求模型共用一条固定值、一项探测任务和一项提前更新计划。无缓存时并发请求加入同一任务；命中后每条原始请求各发一次，仍使用各自的 Authorization、路径和正文，不借用探测者认证来提交他人的原始任务。最多八个等待请求、64 MiB 内存等原有保护不变。多个请求模型之间仍不共享；响应声明名字差异仍按 v0.7 的长度规则处理。
+
+这是管理员选择的兼容策略，不是上游对跨账号或跨轮共享的保证。共享范围跨 API Key，可能跨 sub2api 内部账号；不适合不同上游账号或不受信任租户混用的入口，此时应选 credential / session / turn。即使长度为 292，也不证明上游身份或真实有效期。未携带认证的请求不获共享绑定，sub2api 仍负责原请求鉴权。
+
+为避免未验证请求破坏后台计划，model 缓存命中不会立即保存调用者认证；只有成功探测或完整成功响应才可建立更新凭据。已有计划不被另一个 Key 的缓存命中替换。另一个 Key 的 401/403 不作废来源 Key 的共享固定值；探测认证失败的冷却仅针对相关 Key。每个模型最终只保留一份内存凭据，不写入日志或磁盘。
+
+仅修改有效期时，可用固定值从**原采集时间**重新计算到期时间，不从保存时间开始计时；原状态、指纹保留，已有内存更新计划同步调整。缩短后已经过期则不能继续使用。切换到 model 时从原有合格且未过期的状态中保留最近一条，合并成模型唯一绑定，绝不增加原状态的剩余期限。更改长度、禁用、删除或改回更细隔离会清理受影响绑定，其他模型不受影响。
+
+1 小时有效期仍提前 10 分钟更新；更短周期提前量为周期三分之一，最长 10 分钟。任务内长度未命中可以重试，但多个会话不会重复建立同模型任务。
+
+显式离线迁移（先停止扩展并备份 rules.json、states.json）：
+
+```sh
+node deploy/migrate-model-sharing.mjs --home /var/lib/sub2api-turnstate
+node deploy/migrate-model-sharing.mjs --home /var/lib/sub2api-turnstate --apply
+```
+
+此操作保留启用/停用和长度规则，将已有范围切为 model，并将旧默认 300 秒调整为 3600，其他自定义时长保留。程序正常升级不自动执行该脚本。详见 TEST_SHARING.md。上述 v0.8 范围/时长行为取代旧章节中的默认会话隔离和时长变化清空全部固定值的描述。

@@ -22,7 +22,7 @@ function fixture(t,probe=async()=>hit(B),options={}) {
   const {config}=makeConfig({password:'renewal-testing-password!'});
   let clock=1800000000000, enabled=true;
   const journal=new Journal(home,config), states=new StateStore(home,config.logSalt,e=>journal.add(e),()=>clock);
-  const rules=states.rules;rules[model].ttlSeconds=3600;states.configure(rules);
+  const rules=structuredClone(states.rules);rules[model].ttlSeconds=3600;rules[model].scope='session';states.configure(rules);
   const ctx=states.context(model,headers);states.adoptProbe(ctx,A,model);
   const gate=new AutomaticGate(config,states,journal,()=>enabled,{scheduler:false,now:()=>clock,probe,sleep:async()=>{},...options});
   t.after(async()=>{await gate.close();states.flush();await journal.flush();fs.rmSync(home,{recursive:true,force:true});});
